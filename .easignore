@@ -1,0 +1,11 @@
+# Keep EAS upload lean. Masters are for local `npm run prepare:icons` only —
+# the committed generated files under assets/images/*.png are what the app uses.
+assets/images/icons/
+assets/expo.icon/
+
+# Local size-report / export artifacts
+.size-report/
+
+# Backend (not needed for mobile builds)
+functions/node_modules/
+functions/lib/

@@ -1,0 +1,308 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function userData() {
+      return userDoc(request.auth.uid);
+    }
+
+    function isSeniorAdmin() {
+      return isSignedIn() && userData().role == 'senior_admin';
+    }
+
+    function isGroupAdmin(groupId) {
+      return isSignedIn()
+        && userData().role == 'admin'
+        && groupId in userData().assignedGroupIds;
+    }
+
+    function canManageGroup(groupId) {
+      return isSeniorAdmin() || isGroupAdmin(groupId);
+    }
+
+    function canReadGroupContent(groupId) {
+      return isSeniorAdmin()
+        || isGroupAdmin(groupId)
+        || (isSignedIn() && userData().role == 'user' && userData().groupId == groupId);
+    }
+
+    function pollGroupId(pollId) {
+      return get(/databases/$(database)/documents/polls/$(pollId)).data.groupId;
+    }
+
+    function canVoteOnPoll(pollId) {
+      let groupId = pollGroupId(pollId);
+      return isSignedIn()
+        && userData().role == 'user'
+        && userData().groupId == groupId;
+    }
+
+    function canReadGroup(groupId) {
+      return canReadGroupContent(groupId);
+    }
+
+    function sharesGroupWith(target) {
+      return userData().groupId != null
+        && target.groupId == userData().groupId;
+    }
+
+    function adminManagesTarget(target) {
+      return userData().role == 'admin'
+        && (
+          (target.groupId != null && target.groupId in userData().assignedGroupIds)
+          || (target.role == 'admin' && target.assignedGroupIds.hasAny(userData().assignedGroupIds))
+          || target.role == 'senior_admin'
+        );
+    }
+
+    function canReadUserProfile(userId) {
+      let target = userDoc(userId);
+      return isSignedIn() && (
+        request.auth.uid == userId
+        || isSeniorAdmin()
+        || adminManagesTarget(target)
+        || (userData().role == 'user' && (
+          sharesGroupWith(target)
+          || (target.role == 'admin' && userData().groupId in target.assignedGroupIds)
+          || target.role == 'senior_admin'
+        ))
+      );
+    }
+
+    function ownerProfileUpdateAllowed(userId) {
+      return isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.phoneNumber == resource.data.phoneNumber
+        && !('role' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('groupId' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('assignedGroupIds' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('whitelistKey' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('seniorAdminKey' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('hasPersonalPin' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('activeSessionId' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('activeSessionUpdatedAt' in request.resource.data.diff(resource.data).affectedKeys());
+    }
+
+    function canReadRosterEntry() {
+      return isSeniorAdmin()
+        || (
+          isSignedIn()
+          && userData().role == 'admin'
+          && (
+            (resource.data.role == 'user'
+              && resource.data.groupId != null
+              && resource.data.groupId in userData().assignedGroupIds)
+            || (resource.data.role == 'admin'
+              && resource.data.assignedGroupIds.hasAny(userData().assignedGroupIds))
+          )
+        );
+    }
+
+    // Admins may run collection queries; client scopes by groupId.
+    // (Firestore rejects list queries that depend on `in assignedGroupIds` alone.)
+    function canListRosterAsAdmin() {
+      return isSeniorAdmin()
+        || (isSignedIn() && userData().role == 'admin');
+    }
+
+    function canListUsersAsAdmin() {
+      return isSeniorAdmin()
+        || (isSignedIn() && userData().role == 'admin');
+    }
+
+    match /groups/{groupId} {
+      allow read: if canReadGroup(groupId);
+      allow create, delete: if isSeniorAdmin();
+      allow update: if isSeniorAdmin()
+        || (
+          canManageGroup(groupId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['memberCount', 'postCount', 'pollCount', 'todaysPollResponseCount', 'statsUpdatedAt'])
+        )
+        || (
+          // Voters may bump today's poll response counter for their own group only.
+          isSignedIn()
+          && userData().role == 'user'
+          && userData().groupId == groupId
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['todaysPollResponseCount', 'statsUpdatedAt'])
+        );
+
+      match /push_tokens/{tokenId} {
+        allow read: if false;
+        allow create, update: if isSignedIn()
+          && request.resource.data.uid == request.auth.uid;
+        allow delete: if isSignedIn()
+          && resource.data.uid == request.auth.uid;
+      }
+    }
+
+    match /users/{userId} {
+      allow get: if canReadUserProfile(userId);
+      allow list: if canListUsersAsAdmin();
+      // Profiles are created by Cloud Functions during PIN sign-in
+      allow create: if false;
+      allow update: if ownerProfileUpdateAllowed(userId) || isSeniorAdmin();
+      allow delete: if (isSignedIn() && request.auth.uid == userId) || isSeniorAdmin();
+
+      match /devices/{deviceId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+
+      // Sessions are written by Cloud Functions; client may only read own session.
+      match /sessions/{deviceId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+        allow write: if false;
+      }
+    }
+
+    // Global PIN uniqueness index — Admin SDK / Cloud Functions only
+    match /pin_hashes/{pinHash} {
+      allow read, write: if false;
+    }
+
+    match /posts/{postId} {
+      allow read: if canReadGroupContent(resource.data.groupId);
+      allow create: if canManageGroup(request.resource.data.groupId);
+      // Deletes have no request.resource — only check existing doc + manager role.
+      allow update: if canManageGroup(resource.data.groupId)
+        && request.resource.data.groupId == resource.data.groupId;
+      allow delete: if canManageGroup(resource.data.groupId);
+    }
+
+    match /polls/{pollId} {
+      allow read: if canReadGroupContent(resource.data.groupId);
+      allow create: if canManageGroup(request.resource.data.groupId);
+      allow update: if (
+          canManageGroup(resource.data.groupId)
+          && request.resource.data.groupId == resource.data.groupId
+        )
+        || (
+          isSignedIn()
+          && canReadGroupContent(resource.data.groupId)
+          && request.resource.data.groupId == resource.data.groupId
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['voteCount', 'optionCounts'])
+        );
+      // Deletes have no request.resource — only check existing doc + manager role.
+      allow delete: if canManageGroup(resource.data.groupId);
+    }
+
+    match /votes/{voteId} {
+      allow read: if isSignedIn() && canReadGroupContent(pollGroupId(resource.data.pollId));
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && canVoteOnPoll(request.resource.data.pollId)
+        && (
+          !('groupId' in request.resource.data)
+          || request.resource.data.groupId == pollGroupId(request.resource.data.pollId)
+        );
+      allow update: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.pollId == resource.data.pollId
+        && canVoteOnPoll(request.resource.data.pollId)
+        && (
+          !('groupId' in request.resource.data)
+          || request.resource.data.groupId == pollGroupId(request.resource.data.pollId)
+        );
+      // Prefer groupId on the vote (avoids get(poll) when deleting poll in same batch).
+      // Fall back to poll lookup for legacy votes without groupId.
+      allow delete: if isSignedIn()
+        && (
+          ('groupId' in resource.data && canManageGroup(resource.data.groupId))
+          || canManageGroup(pollGroupId(resource.data.pollId))
+        );
+    }
+
+    match /notifications/{notificationId} {
+      // Personal rows are readable by owner without group membership checks
+      // (required for uid + createdAt list queries to pass rules).
+      allow read: if isSignedIn()
+        && (
+          resource.data.uid == request.auth.uid
+          || (
+            canReadGroupContent(resource.data.groupId)
+            && (
+              !('uid' in resource.data)
+              || resource.data.uid == request.auth.uid
+              || canManageGroup(resource.data.groupId)
+            )
+          )
+        );
+      allow create, update, delete: if false;
+    }
+
+    match /admin_whitelist/{phoneId} {
+      allow get: if isSignedIn();
+      allow list, create, delete: if isSeniorAdmin();
+    }
+
+    // Roster writes are Cloud Functions / Admin SDK only.
+    match /access_roster/{phoneId} {
+      allow get: if canReadRosterEntry();
+      allow list: if canListRosterAsAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /senior_admins/{phoneId} {
+      allow read, write: if false;
+    }
+
+    // PIN hashes — Admin SDK / Cloud Functions only
+    match /group_pins/{groupId} {
+      allow read, write: if false;
+    }
+
+    match /notification_deliveries/{deliveryId} {
+      allow read: if canManageGroup(resource.data.groupId);
+      allow create, update, delete: if false;
+    }
+
+    match /gita_chapters/{chapterId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /gita_verses/{verseId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /member_practice_assignments/{uid} {
+      allow read: if isSignedIn()
+        && (
+          request.auth.uid == uid
+          || canManageGroup(resource.data.groupId)
+        );
+      allow create, update, delete: if false;
+    }
+
+    match /practice_completion_logs/{logId} {
+      allow read: if isSignedIn()
+        && (
+          resource.data.uid == request.auth.uid
+          || canManageGroup(resource.data.groupId)
+        );
+      allow create, update, delete: if false;
+    }
+
+    match /practice_content/{docId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    match /app_config/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isSeniorAdmin();
+    }
+  }
+}

@@ -1,0 +1,22 @@
+/** Brand colors — keep in sync with src/lib/brand-palette.ts */
+module.exports = {
+  primary: '#A67C00',
+  primaryDark: '#E0C35A',
+  background: '#F5EDE6',
+  backgroundDark: '#1A1412',
+  iconBackground: '#28140a',
+  text: '#2B221E',
+  textDark: '#F5EDE8',
+  muted: '#6B5B52',
+  mutedDark: '#B8A89E',
+  border: '#D9C4B0',
+  borderDark: '#4A4038',
+  card: '#FFFFFF',
+  cardDark: '#2A2420',
+  verseCard: '#FDF8F2',
+  verseCardDark: '#2E2620',
+  devotionalBrown: '#5D4037',
+  devotionalBrownDark: '#3D2B1F',
+  gold: '#D4AF37',
+  goldLight: '#E8C547',
+};

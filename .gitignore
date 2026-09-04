@@ -31,13 +31,18 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+functions/.env
+
+# firebase
+functions/lib/
 
 # typescript
 *.tsbuildinfo
 
-example
+# Local size-report / export artifacts
+.size-report/
 
-# generated native folders
-/ios
-/android
+# Local secrets (FCM service account keys, etc.)
+.secrets/

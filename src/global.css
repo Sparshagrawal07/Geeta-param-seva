@@ -6,4 +6,10 @@
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
   --font-rounded: 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif;
   --font-serif: Georgia, 'Times New Roman', serif;
+  /* Brand saffron (#A67C00); ThemeProvider overrides with selected accent */
+  --color-accent: 166 124 0;
 }
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
