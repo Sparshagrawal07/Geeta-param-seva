@@ -393,6 +393,7 @@ export const hiMessages: Record<MessageKey, string> = {
   legalAudienceAdmin: 'ये शर्तें एडमिन और सीनियर एडमिन खातों पर लागू होती हैं।',
   legalAudienceSignedOutNote:
     'सदस्य संस्करण दिखाया जा रहा है। एडमिन खातों की अतिरिक्त ज़िम्मेदारियाँ होती हैं; वे शर्तें एडमिन के रूप में साइन इन करने पर दिखती हैं।',
+  legalViewOnline: 'सार्वजनिक वेब संस्करण देखें',
   signInLegalConsent: 'जारी रखकर आप हमारी शर्तों और गोपनीयता नीति से सहमत होते हैं।',
   deleteAccount: 'खाता हटाएँ',
   deleteAccountTitle: 'खाता हटाएँ?',

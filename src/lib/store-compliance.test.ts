@@ -1,8 +1,19 @@
+import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { LEGAL_SUPPORT_EMAIL, getPrivacyPolicySections, getTermsOfServiceSections, privacyPolicySections, resolveLegalAudience, termsOfServiceSections } from '@/lib/legal-content';
+import {
+  LEGAL_LICENSING_EMAIL,
+  LEGAL_PRIVACY_URL,
+  LEGAL_SUPPORT_EMAIL,
+  LEGAL_TERMS_URL,
+  getPrivacyPolicySections,
+  getTermsOfServiceSections,
+  privacyPolicySections,
+  resolveLegalAudience,
+  termsOfServiceSections,
+} from '@/lib/legal-content';
 import { messages } from '@/lib/i18n/messages';
 
 const ROOT = path.resolve(__dirname, '../..');
@@ -37,6 +48,9 @@ describe('store compliance: legal and account deletion', () => {
       true
     );
     expect(LEGAL_SUPPORT_EMAIL).toBe('geetaparamseva@gmail.com');
+    expect(LEGAL_LICENSING_EMAIL.toLowerCase()).toBe('sparshagrawaln@gmail.com');
+    expect(LEGAL_PRIVACY_URL).toContain('privacy-policy.html');
+    expect(LEGAL_TERMS_URL).toContain('terms.html');
   });
 
   it('ships distinct member and admin privacy/terms variants', () => {
@@ -49,6 +63,8 @@ describe('store compliance: legal and account deletion', () => {
     expect(adminPrivacy).toContain(LEGAL_SUPPORT_EMAIL);
     expect(memberTerms).toContain(LEGAL_SUPPORT_EMAIL);
     expect(adminTerms).toContain(LEGAL_SUPPORT_EMAIL);
+    expect(memberPrivacy).toContain(LEGAL_LICENSING_EMAIL.toLowerCase());
+    expect(memberTerms.toLowerCase()).toMatch(/proprietary|intellectual property/);
 
     expect(adminPrivacy).toMatch(/personal pin|roster|sole/);
     expect(adminTerms).toMatch(/personal pin|join pin|admin/);
@@ -77,6 +93,22 @@ describe('store compliance: legal and account deletion', () => {
     expect(messages.legalAudienceMember.length).toBeGreaterThan(0);
     expect(messages.legalAudienceAdmin.length).toBeGreaterThan(0);
     expect(messages.legalAudienceSignedOutNote.toLowerCase()).toMatch(/member|admin/);
+    expect(messages.legalViewOnline.length).toBeGreaterThan(0);
+  });
+
+  it('builds public GitHub Pages HTML from legal-content', () => {
+    execSync('npm run build:legal-pages', { cwd: ROOT, stdio: 'pipe' });
+    const privacyHtmlPath = path.join(ROOT, 'docs/privacy-policy.html');
+    const termsHtmlPath = path.join(ROOT, 'docs/terms.html');
+    expect(existsSync(privacyHtmlPath)).toBe(true);
+    expect(existsSync(termsHtmlPath)).toBe(true);
+    const privacyHtml = readFileSync(privacyHtmlPath, 'utf8').toLowerCase();
+    const termsHtml = readFileSync(termsHtmlPath, 'utf8').toLowerCase();
+    expect(privacyHtml).toContain('privacy policy');
+    expect(privacyHtml).toContain(LEGAL_SUPPORT_EMAIL.toLowerCase());
+    expect(privacyHtml).toContain(LEGAL_LICENSING_EMAIL.toLowerCase());
+    expect(termsHtml).toContain('terms');
+    expect(termsHtml).toContain('proprietary');
   });
 
   it('keeps legal screens and account settings wired in the app tree', () => {

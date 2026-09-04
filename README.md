@@ -1,59 +1,267 @@
 # Geeta Param Seva
 
-Community app for seva updates, messages, and chapter polls. Built with Expo Router (SDK 57), Firebase Auth (phone + group PIN), Firestore, and Cloud Functions.
+Private, invitation-only community app for **Geeta Param Seva** — seva updates, group messages, Adhyay/Aarti practice, Gita reading, and admin coordination.
 
-## Prerequisites
+Built with **Expo Router (SDK 57)**, **React Native**, **Firebase** (Auth custom tokens, Firestore, Cloud Functions, Remote Config), and optional **AdMob** banner ads.
 
-- Node.js 20.19+ / 22.13+ / 24.3+ (Expo SDK 57)
-- Firebase project: `geeta-param-seva-6aa03`
-- Expo / EAS CLI for store builds
+> **Proprietary software.** All rights reserved. You may not use, copy, modify, or distribute this codebase without prior written permission. Contact: [Sparshagrawaln@gmail.com](mailto:Sparshagrawaln@gmail.com)
 
-## Auth model
+---
 
-- Members sign in with **mobile + unexpired group join PIN** (24h, auto-generated)
-- New admins (roster) first login with join PIN, then must set a **personal PIN**
-- After personal PIN is set, admins/seniors re-login with personal PIN only
-- Only one device session is active per account
-- Cloud Function `signInWithGroupPin` issues a Firebase custom token
+## Table of contents
+
+- [Overview](#overview)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Auth & roles](#auth--roles)
+- [Tech stack](#tech-stack)
+- [Setup](#setup)
+- [Development](#development)
+- [Backend deploy](#backend-deploy)
+- [Banner ads](#banner-ads)
+- [Legal (GitHub Pages)](#legal-github-pages)
+- [Quality checks](#quality-checks)
+- [License](#license)
+
+---
+
+## Overview
+
+```mermaid
+mindmap
+  root((Geeta Param Seva))
+    Members
+      Group feed
+      Practice today
+      Gita / Aarti
+      Push alerts
+    Admins
+      Roster + join PINs
+      Seva posts
+      Practice assign
+      Group tools
+    Seniors
+      All groups
+      Admin roster
+      Global oversight
+    Platform
+      Expo app
+      Firebase
+      AdMob banners
+```
+
+Geeta Param Seva is **not** a public social network. A phone number must already be on the organization roster before anyone can sign in.
+
+---
+
+## Features
+
+| Area | What you get |
+|------|----------------|
+| **Auth** | Phone + group join PIN (members); personal PIN for admins after first login; sole-device session |
+| **Feed** | Seva posts, messages, and alerts scoped to groups |
+| **Practice** | Standing Adhyay / Aarti assignments with completion tracking |
+| **Scripture** | In-app Gita chapters and verses |
+| **i18n** | English + Hindi (with optional machine-assisted strings) |
+| **Ads** | Member-only banner ads (Remote Config kill switch); never on reading / auth screens |
+| **Admin** | Roster, join PIN rotation, content publishing, practice overview |
+
+```mermaid
+flowchart LR
+  subgraph Member["Member experience"]
+    A[Sign in] --> B[Home / practice]
+    B --> C[Seva feed]
+    B --> D[Gita / Aarti]
+    B --> E[Profile / Settings]
+  end
+
+  subgraph Admin["Admin experience"]
+    F[Sign in + personal PIN] --> G[Dashboard]
+    G --> H[Members / roster]
+    G --> I[Create post]
+    G --> J[Practice tools]
+  end
+
+  H -.->|join PIN| A
+```
+
+---
+
+## Architecture
+
+```mermaid
+flowchart TB
+  subgraph Client["Expo app · src/"]
+    UI["expo-router screens<br/>(auth) (user) (admin) legal"]
+    Prov["Providers<br/>auth · locale · theme · ads · notifications"]
+    Svc["Services<br/>feed · roster · practice · account"]
+    UI --> Prov --> Svc
+  end
+
+  subgraph Firebase["Firebase · asia-south1"]
+    Auth["Auth<br/>custom tokens"]
+    FS[(Firestore)]
+    CF["Cloud Functions<br/>pin-auth · roster · practice · push"]
+    RC["Remote Config<br/>ads_* keys"]
+  end
+
+  subgraph Native["Native binaries · EAS"]
+    AdMob["Google Mobile Ads<br/>banner units"]
+    Push["Expo Notifications<br/>FCM / APNs"]
+  end
+
+  Svc -->|HTTPS callable| CF
+  Svc --> Auth
+  Svc --> FS
+  Prov --> RC
+  Prov --> AdMob
+  Prov --> Push
+  CF --> FS
+  CF --> Push
+```
+
+### Repo map
+
+```mermaid
+flowchart LR
+  subgraph Root
+    app["app.config.js"]
+    legalSrc["src/lib/legal-content.ts"]
+    styles["website/styles.css"]
+    docs["docs/ · generated Pages"]
+    fn["functions/ · Cloud Functions"]
+    src["src/ · app · components · services"]
+    scripts["scripts/ · seed & tooling"]
+  end
+
+  app --> src
+  legalSrc --> docs
+  styles --> docs
+  src --> fn
+  scripts --> fn
+  docs -.->|privacy + terms| Store["Play / App Store listings"]
+```
+
+| Path | Role |
+|------|------|
+| `src/app/` | Expo Router routes (auth, member tabs, admin, legal) |
+| `src/services/` | Firestore / Functions client APIs |
+| `src/providers/` | Auth, ads, locale, theme, notifications |
+| `functions/src/` | Callable + scheduled backend |
+| `src/lib/legal-content.ts` | Source of truth for in-app + public legal copy |
+| `website/styles.css` | Styles for the generated Pages site |
+| `docs/` | Generated Privacy / Terms HTML (`npm run build:legal-pages`) |
+| `scripts/` | Seeds, icon prep, APK helpers (local PII stays gitignored) |
+
+---
+
+## Auth & roles
+
+```mermaid
+sequenceDiagram
+  participant U as User
+  participant App as Expo app
+  participant CF as signInWithGroupPin
+  participant FS as Firestore
+
+  U->>App: Phone + join / personal PIN
+  App->>CF: callable
+  CF->>FS: roster / senior_admins + pin_hashes
+  CF-->>App: Firebase custom token
+  App->>App: sole-device session + profile
+  alt Member
+    App-->>U: (user) home / seva / practice
+  else Admin / Senior
+    App-->>U: (admin) dashboard
+  end
+```
+
+| Role | Access |
+|------|--------|
+| **Senior admin** | All groups; roster (members + admins); PINs; practice overview |
+| **Admin** | Assigned groups; members; posts; practice |
+| **Member** | Own group feed; today’s practice; polls; alerts |
+
+Seniors are seeded only via Admin SDK scripts — never created inside the app UI.
+
+---
+
+## Tech stack
+
+- **Client:** Expo SDK 57, Expo Router, React 19, React Native, NativeWind, Reanimated
+- **Backend:** Firebase Auth, Firestore, Cloud Functions (`asia-south1`), Remote Config
+- **Monetization:** `react-native-google-mobile-ads` (banners only)
+- **Tooling:** TypeScript, Vitest, EAS Build, Firebase CLI
+
+Expo versioned docs for this project’s generation: [docs.expo.dev/versions/v54.0.0](https://docs.expo.dev/versions/v54.0.0/) (see also current SDK notes in `AGENTS.md`).
+
+---
 
 ## Setup
+
+### Prerequisites
+
+- Node.js `^20.19.4 \|\| ^22.13.0 \|\| >=24.3.0`
+- Firebase project access + Application Default Credentials for seed scripts
+- Expo / EAS CLI for store / device builds
+
+### Install
 
 ```bash
 npm install
 cp .env.example .env
 cp functions/.env.example functions/.env
+cp google-services.json.example google-services.json
+cp GoogleService-Info.plist.example GoogleService-Info.plist
+# Replace example Firebase / AdMob values with your local secrets (never commit them)
 ```
 
-### Seed senior admin
+### Local secret data (gitignored)
+
+| File | Purpose |
+|------|---------|
+| `.env` | AdMob app IDs, feature flags |
+| `google-services.json` / `GoogleService-Info.plist` | Firebase native config |
+| `scripts/data/senior-admins.local.json` | Real senior phones (from `senior-admins.example.json`) |
+| `scripts/data/group-1-roster.json` | Real roster PII (from `group-1-roster.example.json`) |
 
 ```bash
-# optional: SENIOR_ADMIN_PIN=246810 HRIDYA_SENIOR_ADMIN_PIN=321456
-node scripts/seed-senior-admin.cjs
+cp scripts/data/senior-admins.example.json scripts/data/senior-admins.local.json
+# edit phones locally, then:
+SENIOR_ADMIN_PIN=****** HRIDYA_SENIOR_ADMIN_PIN=****** node scripts/seed-senior-admin.cjs
 ```
 
-Seeded senior admins (created only via DB/seed — never in the app):
-
-| Name | Phone | PIN |
-|------|-------|-----|
-| Sparsh Agrawal | `+919599679802` | `246810` |
-| Hridya Hirawat | `+918810419061` | `321456` |
-
-### Seed QA admin + member
+QA accounts (placeholders — override with env if needed):
 
 ```bash
 node scripts/seed-test-accounts.cjs
+# Admin:  +911111111111 / personal PIN 111111
+# Member: +912222222222 / join PIN 222222
 ```
 
-| Account | Phone | PIN |
-|---------|-------|-----|
-| Admin | `+911111111111` | Personal `111111` |
-| Member | `+912222222222` | Join `222222` (long QA expiry) |
+---
 
 ## Development
 
 ```bash
 npx expo start
+# or
+npm run android
+npm run ios
 ```
+
+```mermaid
+flowchart LR
+  Dev[Developer] --> Expo[expo start]
+  Expo --> Metro[Metro bundler]
+  Metro --> Device[Simulator / device]
+  Device --> FB[Firebase project]
+  Device -.->|dev client / EAS| Ads[AdMob SDK]
+```
+
+Custom notification sound and production AdMob require a **development or EAS build** (not Expo Go).
+
+---
 
 ## Backend deploy
 
@@ -61,83 +269,50 @@ npx expo start
 npm run deploy:backend
 ```
 
-Required functions include: `signInWithGroupPin`, `generateGroupJoinPin`, `setPersonalPin`, roster upsert/deactivate, practice assignment/completion/reminder callables, `wipeDailyFeed`, `deleteAccount`.
+Important callables include: `signInWithGroupPin`, `generateGroupJoinPin`, `setPersonalPin`, roster upsert/deactivate, practice assignment/completion/reminder, `wipeDailyFeed`, `deleteAccount`.
 
-## Roles
+---
 
-| Role | Access |
-|------|--------|
-| Senior admin | All groups; roster (members + admins); PINs; practice overview |
-| Admin | Assigned groups only; add members; posts, polls; standing Adhyay/Aarti practice |
-| Member | Own group feed; today’s practice (Adhyay/Aarti); vote on polls; alerts |
+## Banner ads
 
-Private access: phone must be on `access_roster` before PIN sign-in.
-
-## Banner ads (AdMob + Remote Config)
-
-Member-only **banner ads** (no interstitial / video). Placement is scroll-bound and away from primary taps:
+Member-only banners (no interstitial / video). Placement is scroll-bound and away from primary taps:
 
 | Screen | Banners |
 |--------|---------|
-| Home | Up to 2 (slot 2 only if screen height ≥ 720) after practice + Gita entry |
+| Home | Up to 2 (slot 2 if height allows) |
 | Seva | 1 after the feed |
 | Profile | 1 at the bottom |
 | Aarti / Gita / auth / notifications / admin | none |
 
-1. Create AdMob apps + **banner** units (Android + iOS). In AdMob blocking controls, restrict adult / dating / gambling categories.
-2. Set app IDs in env / EAS secrets: `EXPO_PUBLIC_ADMOB_ANDROID_APP_ID`, `EXPO_PUBLIC_ADMOB_IOS_APP_ID`.
-3. Publish Remote Config (unit IDs + kill switch):
+1. Set `EXPO_PUBLIC_ADMOB_ANDROID_APP_ID` / `EXPO_PUBLIC_ADMOB_IOS_APP_ID` in `.env` or EAS secrets.
+2. Publish Remote Config unit IDs + `ads_enabled` via `npm run seed:ads-config:apply`.
+3. Rebuild a native binary.
+
+---
+
+## Legal (GitHub Pages)
+
+Do **not** hand-edit `docs/*.html`. Regenerate from source:
 
 ```bash
-ADS_ENABLED=true \
-ADS_BANNER_ANDROID=ca-app-pub-xxx/yyy \
-ADS_BANNER_IOS=ca-app-pub-xxx/zzz \
-node scripts/seed-ads-remote-config.cjs --apply
+npm run build:legal-pages
 ```
 
-4. Rebuild a native binary (ads SDK is not available in Expo Go):
+Pipeline: `src/lib/legal-content.ts` + `website/styles.css` → `scripts/build-legal-pages.mjs` → [`docs/`](./docs/). GitHub Actions (`.github/workflows/deploy-pages.yml`) runs the same build and deploys the artifact.
 
-```bash
-npm run build:android:aab:local
-# or eas build for iOS / Android
-```
+**Enable Pages once:** repo **Settings → Pages → Build and deployment → Source: GitHub Actions**. Then push to `main` (or run **Deploy legal pages** via Actions → workflow_dispatch).
 
-Remote keys: `ads_enabled`, `ads_max_home`, `ads_show_home|seva|profile`, `ads_show_admins`, `ads_banner_android`, `ads_banner_ios`, optional `*_2` units. In `__DEV__`, Google test banner IDs are used when Remote Config units are empty.
+| Page | URL |
+|------|-----|
+| Home | https://sparshagrawal07.github.io/Geeta-param-seva/ |
+| Privacy Policy | https://sparshagrawal07.github.io/Geeta-param-seva/privacy-policy.html |
+| Terms & Conditions | https://sparshagrawal07.github.io/Geeta-param-seva/terms.html |
 
-## Brand icons
+In-app legal screens mirror the same member-facing copy and link out to these URLs (`LEGAL_PRIVACY_URL` / `LEGAL_TERMS_URL` in `src/lib/legal-content.ts`).
 
-Platform masters live in `assets/images/icons/` (iOS AppIcon set + Android mipmaps).
-Generate Expo-facing assets after updating masters:
+Support: [geetaparamseva@gmail.com](mailto:geetaparamseva@gmail.com) · Licensing: [Sparshagrawaln@gmail.com](mailto:Sparshagrawaln@gmail.com)
 
-```bash
-npm run prepare:icons
-```
-
-This writes `icon.png`, `adaptive-icon.png`, `logo.png`, `favicon.png`, and `notification-icon.png` under `assets/images/` with Android adaptive safe-zone padding and a white notification mask.
-
-```bash
-# Play Store AAB
-npx eas build --profile production --platform android
-
-# Installable preview APK (same app id + name as production)
-npm run build:android:apk
-
-# EAS hosting always names CDN downloads `application-<buildId>.apk`.
-# Save a clean local file after a finished build:
-npm run download:android:apk
-# → dist/Geeta-Param-Seva.apk
-
-# Or build on EAS, wait, and save in one step:
-npm run build:android:apk:save
-
-# Optional: local EAS build with an explicit output path
-npm run build:android:apk:local
-
-# Install latest preview APK onto a connected device/emulator
-npm run install:android:apk
-```
-
-Custom notification sound and remote push require a development/EAS build (not Expo Go).
+---
 
 ## Quality checks
 
@@ -146,3 +321,26 @@ npm test
 npm run typecheck
 npm run functions:build
 ```
+
+---
+
+## Builds (Android)
+
+```bash
+npm run build:android:apk          # EAS preview APK
+npm run download:android:apk       # save → dist/Geeta-Param-Seva.apk
+npm run build:android:aab          # Play Store AAB
+npm run prepare:icons              # regenerate Expo icons from masters
+```
+
+---
+
+## License
+
+**Copyright © Sparsh Agrawal. All Rights Reserved.**
+
+This repository is **not** open source. No permission is granted to use, copy, modify, merge, publish, distribute, sublicense, or sell any part of this software without **prior written permission**.
+
+For permissions: **[Sparshagrawaln@gmail.com](mailto:Sparshagrawaln@gmail.com)**
+
+See [`LICENSE`](./LICENSE). Package license field: `UNLICENSED`.

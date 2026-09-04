@@ -1,5 +1,13 @@
 const brandPalette = require('./brand-palette.js');
 
+// Ensure EXPO_PUBLIC_ADMOB_* from .env are visible when Expo evaluates this config.
+try {
+  // eslint-disable-next-line import/no-extraneous-dependencies, @typescript-eslint/no-require-imports
+  require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+} catch {
+  // dotenv optional; EAS/env may already inject vars
+}
+
 const APP_NAME = 'Geeta Param Seva';
 const APP_PACKAGE = 'com.geetaparamseva.app';
 
@@ -20,10 +28,16 @@ const androidBuildArchs =
   buildProfile === 'preview-arm64' ? ['arm64-v8a'] : ['armeabi-v7a', 'arm64-v8a'];
 
 /** Google sample IDs until real AdMob app IDs are set in env / EAS secrets. */
+const appJson = require('./app.json');
+const admobFromJson = appJson['react-native-google-mobile-ads'] || {};
 const admobAndroidAppId =
-  process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID || 'ca-app-pub-3940256099942544~3347511713';
+  process.env.EXPO_PUBLIC_ADMOB_ANDROID_APP_ID ||
+  admobFromJson.android_app_id ||
+  'ca-app-pub-3940256099942544~3347511713';
 const admobIosAppId =
-  process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID || 'ca-app-pub-3940256099942544~1458002511';
+  process.env.EXPO_PUBLIC_ADMOB_IOS_APP_ID ||
+  admobFromJson.ios_app_id ||
+  'ca-app-pub-3940256099942544~1458002511';
 
 /** @type {import('expo/config').ExpoConfig} */
 const config = {
@@ -122,6 +136,7 @@ const config = {
         iosAppId: admobIosAppId,
       },
     ],
+    './plugins/with-admob-sdk-pin',
     [
       './plugins/with-apk-filename',
       { apkBaseName: 'Geeta-Param-Seva' },
@@ -139,8 +154,9 @@ const config = {
 };
 
 module.exports = {
+  // Keep app.json AdMob keys in the resolved config (expo-doctor + invertase gradle).
+  ...appJson,
   expo: config,
-  // Also required at root for some native gradle reads of the AdMob plugin.
   'react-native-google-mobile-ads': {
     android_app_id: admobAndroidAppId,
     ios_app_id: admobIosAppId,

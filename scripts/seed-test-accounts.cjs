@@ -13,12 +13,12 @@ const admin = require(path.join(__dirname, '../functions/node_modules/firebase-a
 
 const PROJECT_ID = 'geeta-param-seva-6aa03';
 const TEST_GROUP_ID = 'qa-test-group';
-const ADMIN_PHONE = '+919876987622';
-const ADMIN_PHONE_ID = '919876987622';
-const ADMIN_PIN = '111111';
-const MEMBER_PHONE = '+919876987623';
-const MEMBER_PHONE_ID = '919876987623';
-const JOIN_PIN = '222222';
+const ADMIN_PHONE = process.env.QA_ADMIN_PHONE || '+911111111111';
+const ADMIN_PHONE_ID = ADMIN_PHONE.replace(/^\+/, '');
+const ADMIN_PIN = process.env.QA_ADMIN_PIN || '111111';
+const MEMBER_PHONE = process.env.QA_MEMBER_PHONE || '+912222222222';
+const MEMBER_PHONE_ID = MEMBER_PHONE.replace(/^\+/, '');
+const JOIN_PIN = process.env.QA_MEMBER_JOIN_PIN || '222222';
 /** ~10 years so QA does not constantly regenerate */
 const JOIN_PIN_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 

@@ -23,7 +23,12 @@ export default function TermsOfServiceScreen() {
       <SpiritualSurface>
         <SpiritualSurfaceBody className="py-4">
           <AppText className="text-sm text-gp-muted dark:text-gp-muted-dark">{t('legalLastUpdated')}</AppText>
-          <LegalDocument audience={audience} signedOut={signedOut} sections={sections} />
+          <LegalDocument
+            audience={audience}
+            signedOut={signedOut}
+            sections={sections}
+            document="terms"
+          />
         </SpiritualSurfaceBody>
       </SpiritualSurface>
     </Screen>

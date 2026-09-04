@@ -3,6 +3,11 @@
  *
  * Preserves senior_admin / admin accounts.
  *
+ * Data file (gitignored — contains real member PII):
+ *   scripts/data/group-1-roster.json
+ * Example shape:
+ *   scripts/data/group-1-roster.example.json
+ *
  * Dry-run:  node scripts/seed-group1-roster.cjs
  * Apply:    node scripts/seed-group1-roster.cjs --apply
  */

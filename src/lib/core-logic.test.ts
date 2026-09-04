@@ -79,8 +79,8 @@ describe('phone utilities', () => {
   it('sanitizes Indian mobile digits to at most 10', () => {
     expect(sanitizeIndianMobileDigits('+91 98765-43210')).toBe('9876543210');
     expect(sanitizeIndianMobileDigits('919876543210')).toBe('9876543210');
-    expect(sanitizeIndianMobileDigits('+919599679802')).toBe('9599679802');
-    expect(sanitizeIndianMobileDigits('00919599679802')).toBe('9599679802');
+    expect(sanitizeIndianMobileDigits('+919876543210')).toBe('9876543210');
+    expect(sanitizeIndianMobileDigits('00919876543210')).toBe('9876543210');
     expect(sanitizeIndianMobileDigits('09876543210')).toBe('9876543210');
     expect(sanitizeIndianMobileDigits('98765432101234')).toBe('9876543210');
     expect(sanitizeIndianMobileDigits('98a76b543210')).toBe('9876543210');

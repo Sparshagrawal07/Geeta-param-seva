@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "554131573621",
-    "project_id": "geeta-param-seva-6aa03",
-    "storage_bucket": "geeta-param-seva-6aa03.firebasestorage.app"
+    "project_number": "YOUR_PROJECT_NUMBER",
+    "project_id": "your-firebase-project-id",
+    "storage_bucket": "your-firebase-project-id.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:554131573621:android:710d49b1bdf4a724ee213c",
+        "mobilesdk_app_id": "1:YOUR_PROJECT_NUMBER:android:YOUR_ANDROID_APP_ID",
         "android_client_info": {
           "package_name": "com.geetaparamseva.app"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyBeekaRXCAhctY4-jM1J8ZNwYInrGgsooo"
+          "current_key": "YOUR_ANDROID_API_KEY"
         }
       ],
       "services": {

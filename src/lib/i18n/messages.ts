@@ -393,6 +393,7 @@ export const messages = {
   legalAudienceAdmin: 'These terms apply to admin and senior admin accounts.',
   legalAudienceSignedOutNote:
     'Showing the member version. Admin accounts have additional responsibilities; those terms appear when signed in as an admin.',
+  legalViewOnline: 'View the public web version',
   signInLegalConsent: 'By continuing, you agree to our Terms and Privacy Policy.',
   deleteAccount: 'Delete account',
   deleteAccountTitle: 'Delete account?',

@@ -15,6 +15,8 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run build:legal-pages
       - run: npm test
       - run: npm run typecheck
       - run: npm run functions:build
+

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Example Senior Admin",
+    "phoneNumber": "+919999999991",
+    "phoneId": "919999999991",
+    "pinEnv": "SENIOR_ADMIN_PIN"
+  },
+  {
+    "name": "Example Senior Admin 2",
+    "phoneNumber": "+919999999992",
+    "phoneId": "919999999992",
+    "pinEnv": "HRIDYA_SENIOR_ADMIN_PIN"
+  }
+]

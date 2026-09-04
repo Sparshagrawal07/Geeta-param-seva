@@ -1,0 +1,4 @@
+[
+  {"name": "EXAMPLE MEMBER ONE", "phone": "9876543210", "adhyays": [1, 2], "aarti": false},
+  {"name": "EXAMPLE MEMBER TWO", "phone": "9876543211", "adhyays": [3, 4], "aarti": true}
+]

@@ -1,6 +1,13 @@
-import { isAdminRole, type UserRole } from '@/lib/users';
+import type { UserRole } from './users';
 
 export const LEGAL_SUPPORT_EMAIL = 'geetaparamseva@gmail.com';
+/** Licensing / permission requests (proprietary software). */
+export const LEGAL_LICENSING_EMAIL = 'Sparshagrawaln@gmail.com';
+
+/** Public GitHub Pages site for store listings and external reviewers. */
+export const LEGAL_PAGES_BASE_URL = 'https://sparshagrawal07.github.io/Geeta-param-seva';
+export const LEGAL_PRIVACY_URL = `${LEGAL_PAGES_BASE_URL}/privacy-policy.html`;
+export const LEGAL_TERMS_URL = `${LEGAL_PAGES_BASE_URL}/terms.html`;
 
 export type LegalAudience = 'member' | 'admin';
 
@@ -9,9 +16,13 @@ export interface LegalSection {
   body: string;
 }
 
+function isAdminLegalRole(role: UserRole | null | undefined): boolean {
+  return role === 'senior_admin' || role === 'admin';
+}
+
 /** Resolve which legal variant to show from the signed-in role. Logged-out → member. */
 export function resolveLegalAudience(role: UserRole | null | undefined): LegalAudience {
-  return isAdminRole(role) ? 'admin' : 'member';
+  return isAdminLegalRole(role) ? 'admin' : 'member';
 }
 
 const sharedPrivacyThirdParties: LegalSection = {
@@ -28,7 +39,7 @@ const sharedPrivacyAdvertising: LegalSection = {
 
 const sharedPrivacyContact: LegalSection = {
   title: 'Contact',
-  body: `Privacy questions: ${LEGAL_SUPPORT_EMAIL}.`,
+  body: `Privacy questions: ${LEGAL_SUPPORT_EMAIL}. Licensing or permission to use the Geeta Param Seva software: ${LEGAL_LICENSING_EMAIL}.`,
 };
 
 const sharedPrivacyChildren: LegalSection = {
@@ -145,7 +156,12 @@ export function getTermsOfServiceSections(audience: LegalAudience): LegalSection
       },
       {
         title: 'Contact',
-        body: `Support: ${LEGAL_SUPPORT_EMAIL}.`,
+        body: `Support: ${LEGAL_SUPPORT_EMAIL}. Licensing or permission to use the software: ${LEGAL_LICENSING_EMAIL}.`,
+      },
+      {
+        title: 'Intellectual property',
+        body:
+          'Geeta Param Seva software, branding, and related materials are proprietary. You may not copy, modify, distribute, or sublicense the software without explicit written permission from Sparsh Agrawal.',
       },
     ];
   }
@@ -188,7 +204,12 @@ export function getTermsOfServiceSections(audience: LegalAudience): LegalSection
     },
     {
       title: 'Contact',
-      body: `Support: ${LEGAL_SUPPORT_EMAIL}.`,
+      body: `Support: ${LEGAL_SUPPORT_EMAIL}. Licensing or permission to use the software: ${LEGAL_LICENSING_EMAIL}.`,
+    },
+    {
+      title: 'Intellectual property',
+      body:
+        'Geeta Param Seva software, branding, and related materials are proprietary. You may not copy, modify, distribute, or sublicense the software without explicit written permission from Sparsh Agrawal.',
     },
   ];
 }

@@ -4,30 +4,70 @@
  *
  * Run: node scripts/seed-senior-admin.cjs
  *
- * Optional overrides:
- *   SENIOR_ADMIN_PIN — PIN for Sparsh only (default 246810)
- *   HRIDYA_SENIOR_ADMIN_PIN — PIN for Hridya (default 321456)
+ * Data source (first match wins):
+ *   1. SENIOR_ADMINS_FILE — path to JSON array
+ *   2. scripts/data/senior-admins.local.json (gitignored)
+ *
+ * Copy scripts/data/senior-admins.example.json → senior-admins.local.json
+ * and fill real phones/names locally. Never commit real PII.
+ *
+ * PIN env vars (optional defaults only for local bootstrap):
+ *   SENIOR_ADMIN_PIN
+ *   HRIDYA_SENIOR_ADMIN_PIN
+ *   Or set "pin" / "pinEnv" per entry in the JSON file.
  */
+const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const admin = require(path.join(__dirname, '../functions/node_modules/firebase-admin'));
 
 const PROJECT_ID = 'geeta-param-seva-6aa03';
+const LOCAL_DATA = path.join(__dirname, 'data/senior-admins.local.json');
 
-const SENIORS = [
-  {
-    name: 'Sparsh Agrawal',
-    phoneNumber: '+919599679802',
-    phoneId: '919599679802',
-    pin: process.env.SENIOR_ADMIN_PIN || '246810',
-  },
-  {
-    name: 'Hridya Hirawat',
-    phoneNumber: '+918810419061',
-    phoneId: '918810419061',
-    pin: process.env.HRIDYA_SENIOR_ADMIN_PIN || '321456',
-  },
-];
+function loadSeniors() {
+  const fromEnv = process.env.SENIOR_ADMINS_FILE
+    ? path.resolve(process.env.SENIOR_ADMINS_FILE)
+    : null;
+  const dataPath = fromEnv && fs.existsSync(fromEnv) ? fromEnv : LOCAL_DATA;
+
+  if (!fs.existsSync(dataPath)) {
+    console.error(
+      'Missing senior admin data file.\n' +
+        `  Expected: ${LOCAL_DATA}\n` +
+        '  Or set SENIOR_ADMINS_FILE to a JSON path.\n' +
+        '  Copy scripts/data/senior-admins.example.json → senior-admins.local.json (gitignored).'
+    );
+    process.exit(1);
+  }
+
+  const raw = JSON.parse(fs.readFileSync(dataPath, 'utf8'));
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new Error(`Senior admin file must be a non-empty JSON array: ${dataPath}`);
+  }
+
+  return raw.map((entry, index) => {
+    const name = String(entry.name || '').trim();
+    const phoneNumber = String(entry.phoneNumber || '').trim();
+    const phoneId = String(entry.phoneId || phoneNumber.replace(/\D/g, '')).trim();
+    const pinEnv = entry.pinEnv ? String(entry.pinEnv) : null;
+    const pin =
+      (entry.pin != null ? String(entry.pin) : null) ||
+      (pinEnv && process.env[pinEnv]) ||
+      process.env.SENIOR_ADMIN_PIN ||
+      null;
+
+    if (!name || !phoneNumber || !phoneId) {
+      throw new Error(`Invalid senior admin entry at index ${index} in ${dataPath}`);
+    }
+    if (!pin) {
+      throw new Error(
+        `Missing PIN for ${name}. Set "pin" in JSON, or pinEnv / SENIOR_ADMIN_PIN.`
+      );
+    }
+
+    return { name, phoneNumber, phoneId, pin };
+  });
+}
 
 function hashPin(value) {
   return crypto.createHash('sha256').update(`gps-pin:${value}`).digest('hex');
@@ -117,8 +157,9 @@ async function seedSenior(db, senior) {
 }
 
 async function main() {
+  const seniors = loadSeniors();
   const db = admin.firestore();
-  for (const senior of SENIORS) {
+  for (const senior of seniors) {
     await seedSenior(db, senior);
   }
 }
