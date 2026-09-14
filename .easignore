@@ -9,3 +9,4 @@ assets/expo.icon/
 # Backend (not needed for mobile builds)
 functions/node_modules/
 functions/lib/
+firebase-debug.log

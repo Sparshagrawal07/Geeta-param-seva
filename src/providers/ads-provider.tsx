@@ -63,7 +63,9 @@ export function AdsProvider({ children }: { children: ReactNode }) {
     try {
       const rc = getRemoteConfig(app);
       rc.settings = {
-        minimumFetchIntervalMillis: __DEV__ ? 0 : 60 * 60 * 1000,
+        // Keep short enough that Play closed-test / Remote Config toggles apply without a long wait.
+        // Still avoid hammering RC on every focus: 5 minutes in release, immediate in __DEV__.
+        minimumFetchIntervalMillis: __DEV__ ? 0 : 5 * 60 * 1000,
         fetchTimeoutMillis: 15_000,
       };
       rc.defaultConfig = {
@@ -108,7 +110,14 @@ export function AdsProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
     void (async () => {
       try {
-        await native.mobileAds().initialize();
+        const ads = native.mobileAds();
+        await ads.initialize();
+        if (typeof ads.setRequestConfiguration === 'function') {
+          await ads.setRequestConfiguration({
+            tagForChildDirectedTreatment: false,
+            tagForUnderAgeOfConsent: false,
+          });
+        }
         if (!cancelled) setSdkReady(true);
       } catch {
         if (!cancelled) setSdkReady(false);

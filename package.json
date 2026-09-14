@@ -13,6 +13,7 @@
     "@react-native-community/slider": "5.2.0",
     "expo": "~57.0.20",
     "expo-build-properties": "~57.0.17",
+    "expo-clipboard": "~57.0.1",
     "expo-constants": "~57.0.17",
     "expo-device": "~57.0.1",
     "expo-file-system": "~57.0.6",
@@ -49,7 +50,6 @@
     "eslint-config-expo": "~57.0.2",
     "ffmpeg-static": "^5.3.0",
     "firebase-tools": "^15.19.1",
-    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.19",
     "typescript": "~6.0.3",
     "vitest": "^3.2.6"
@@ -60,6 +60,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
+    "eas-build-pre-install": "node scripts/eas-pre-install.cjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "functions:build": "npm --prefix functions run build",
@@ -83,11 +84,17 @@
     "build:android:apk:local": "ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ANDROID_SDK_ROOT=/opt/homebrew/share/android-commandlinetools EAS_BUILD_NO_EXPO_GO_WARNING=true npx eas-cli build --platform android --profile preview --local --output dist/Geeta-Param-Seva.apk",
     "download:android:apk": "node scripts/download-android-apk.mjs --profile preview",
     "download:android:apk:arm64": "node scripts/download-android-apk.mjs --profile preview-arm64",
+    "build:ios": "npx eas-cli build --platform ios --profile ios-simulator",
+    "build:ios:simulator": "npx eas-cli build --platform ios --profile ios-simulator",
+    "build:ios:production": "npx eas-cli build --platform ios --profile production",
     "build:android:aab": "npx eas-cli build --platform android --profile production",
     "build:android:aab:local": "ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ANDROID_SDK_ROOT=/opt/homebrew/share/android-commandlinetools EAS_BUILD_NO_EXPO_GO_WARNING=true npx eas-cli build --platform android --profile production --local --output dist/Geeta-Param-Seva.aab",
     "install:android:apk": "npx eas-cli build:run -p android --latest --profile preview",
     "size:js": "npx expo export --platform android --output-dir .size-report/bundle && du -h .size-report/bundle/_expo/static/js/android/*.hbc",
     "build:legal-pages": "node scripts/build-legal-pages.mjs"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.34.5"
   },
   "engines": {
     "node": "^20.19.4 || ^22.13.0 || >=24.3.0"

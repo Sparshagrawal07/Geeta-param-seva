@@ -10,7 +10,7 @@ import { db } from './firebase-admin';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 /** Bumped when channel sound/importance must change (Android channels are immutable). */
-export const ANDROID_CHANNEL_ID = 'community-reminders-v2';
+export const ANDROID_CHANNEL_ID = 'community-reminders-v4';
 export const SOUND_FILENAME = 'community_reminder.wav';
 
 export interface ExpoPushMessage {
@@ -20,6 +20,8 @@ export interface ExpoPushMessage {
   sound?: string;
   channelId?: string;
   priority?: 'default' | 'normal' | 'high';
+  /** iOS Focus / Lock Screen urgency — requires Time Sensitive capability for full effect. */
+  interruptionLevel?: 'active' | 'critical' | 'passive' | 'timeSensitive';
   data?: Record<string, unknown>;
 }
 
@@ -264,6 +266,7 @@ export async function sendExpoPush(messages: ExpoPushMessage[]): Promise<ExpoPus
       sound: msg.sound ?? SOUND_FILENAME,
       channelId: msg.channelId ?? ANDROID_CHANNEL_ID,
       priority: msg.priority ?? 'high',
+      interruptionLevel: msg.interruptionLevel ?? 'timeSensitive',
       data: msg.data ?? {},
     }));
 

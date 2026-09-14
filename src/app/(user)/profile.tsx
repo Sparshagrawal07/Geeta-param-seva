@@ -32,7 +32,9 @@ export default function UserProfileScreen() {
         </SpiritualSurfaceBody>
       </SpiritualSurface>
 
-      <SafeBannerAd screen="profile" slot={1} />
+      <View className="mt-10">
+        <SafeBannerAd screen="profile" slot={1} />
+      </View>
     </Screen>
   );
 }

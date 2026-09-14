@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { RefreshControl } from 'react-native';
+import { RefreshControl, View } from 'react-native';
 
 import { useGroupFeed, GroupFeedList } from '@/components/feed/group-feed';
 import { SafeBannerAd } from '@/components/ads/safe-banner-ad';
@@ -47,7 +47,9 @@ export default function UserSevaScreen() {
         onRefresh={() => void handleRefresh()}
       />
 
-      <SafeBannerAd screen="seva" slot={1} />
+      <View className="mt-10">
+        <SafeBannerAd screen="seva" slot={1} />
+      </View>
     </Screen>
   );
 }

@@ -259,7 +259,26 @@ export async function resolveLogin(phoneNumber: string, pin: string): Promise<Re
     };
   }
 
-  // 4) Member — join PIN only; never elevates to admin.
+  // 4) Member with personal PIN (seeded / App Review demos) — join PIN never accepted.
+  if (rosterRole === 'user' && personalHash) {
+    const groupId = typeof roster.groupId === 'string' ? roster.groupId : '';
+    if (!groupId) {
+      throw new HttpsError('permission-denied', 'No group assigned. Contact an admin.');
+    }
+    if (pinsMatch(pin, personalHash)) {
+      return {
+        role: 'user',
+        name,
+        phoneNumber,
+        groupId,
+        assignedGroupIds: [],
+        needsPersonalPin: false,
+      };
+    }
+    throw new HttpsError('permission-denied', 'Incorrect phone number or PIN.');
+  }
+
+  // 5) Member — join PIN only; never elevates to admin.
   const groupId = typeof roster.groupId === 'string' ? roster.groupId : '';
   if (!groupId) {
     throw new HttpsError('permission-denied', 'No group assigned. Contact an admin.');

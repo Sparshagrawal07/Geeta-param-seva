@@ -1,4 +1,4 @@
-import { ActivityIndicator, Pressable } from 'react-native';
+import { ActivityIndicator, Pressable, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
 import { AppText } from '@/components/ui/app-text';
@@ -33,24 +33,33 @@ export function SpiritualPrimaryButton({
         void triggerHaptic('medium');
         onPress();
       }}
-      className="overflow-hidden rounded-2xl shadow-md shadow-black/20"
+      className="w-full overflow-hidden rounded-2xl shadow-md shadow-black/20"
       style={{ opacity: disabled || loading ? 0.65 : 1 }}>
       <LinearGradient
         colors={[...colors]}
         start={{ x: 0, y: 0.5 }}
         end={{ x: 1, y: 0.5 }}
-        className={`flex-row items-center justify-center gap-2 px-5 ${
-          isLarge ? 'min-h-[64px] py-4' : 'min-h-[52px] py-3.5'
-        }`}>
+        style={{
+          minHeight: isLarge ? 64 : 52,
+          paddingVertical: isLarge ? 16 : 14,
+          paddingHorizontal: 18,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 8,
+        }}>
         {loading ? (
           <ActivityIndicator color="#FFFFFF" />
         ) : (
-          <>
+          <View className="max-w-full flex-row flex-wrap items-center justify-center gap-2 px-1">
             <AppText className={isLarge ? 'text-lg' : 'text-base'}>🪷</AppText>
-            <AppText bold className={`${isLarge ? 'text-lg' : 'text-base'} text-white`}>
+            <AppText
+              bold
+              numberOfLines={2}
+              className={`${isLarge ? 'text-lg' : 'text-base'} shrink text-center text-white`}>
               {label}
             </AppText>
-          </>
+          </View>
         )}
       </LinearGradient>
     </Pressable>

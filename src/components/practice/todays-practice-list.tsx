@@ -142,7 +142,7 @@ export function TodaysPracticeList({ items, loading = false, onCompleted }: Toda
               ))}
             </View>
 
-            <View className="mt-5">
+            <View className="relative z-10 mt-5">
               {allComplete ? (
                 <CompletionBadge variant="completed" />
               ) : (

@@ -28,6 +28,10 @@ interface SpiritualScreenProps {
   animateContent?: boolean;
   /** Constrain content width on tablets */
   centered?: boolean;
+  /**
+   * Safe-area edges. Default `['top']` for tab scenes (tab bar already clears system nav).
+   * Use `['top','bottom']` on root stack screens without a tab bar (settings, legal).
+   */
   edges?: ('top' | 'bottom')[];
 }
 
@@ -126,15 +130,17 @@ export function SpiritualScreen({
   );
 }
 
-/** Auth form shell with keyboard avoidance */
+/** Auth form shell with keyboard avoidance. Top inset comes from AuthHeroHeader; bottom clears system nav. */
 export function SpiritualAuthShell({ children }: { children: ReactNode }) {
   return (
     <KeyboardAvoidingView
       className="flex-1 bg-gp-bg dark:bg-gp-bg-dark"
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
-        {children}
-      </ScrollView>
+      <SafeAreaView className="flex-1" edges={['bottom']}>
+        <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+          {children}
+        </ScrollView>
+      </SafeAreaView>
     </KeyboardAvoidingView>
   );
 }

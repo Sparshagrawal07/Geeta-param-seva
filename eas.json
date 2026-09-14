@@ -7,37 +7,63 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "autoIncrement": true,
       "ios": {
         "simulator": true
       }
     },
     "preview": {
       "distribution": "internal",
+      "autoIncrement": true,
       "android": {
         "buildType": "apk",
         "applicationArchivePath": "android/app/build/outputs/apk/**/*.apk"
       },
       "env": {
-        "EAS_BUILD_PROFILE": "preview"
+        "EAS_BUILD_PROFILE": "preview",
+        "SHARP_IGNORE_GLOBAL_LIBVIPS": "1"
       }
     },
     "preview-arm64": {
       "distribution": "internal",
+      "autoIncrement": true,
       "android": {
         "buildType": "apk",
         "applicationArchivePath": "android/app/build/outputs/apk/**/*.apk"
       },
       "env": {
-        "EAS_BUILD_PROFILE": "preview-arm64"
+        "EAS_BUILD_PROFILE": "preview-arm64",
+        "SHARP_IGNORE_GLOBAL_LIBVIPS": "1"
       }
     },
     "production": {
       "autoIncrement": true,
+      "distribution": "store",
+      "node": "20.19.4",
       "android": {
         "buildType": "app-bundle"
       },
+      "ios": {
+        "resourceClass": "m-medium",
+        "simulator": false
+      },
       "env": {
-        "EAS_BUILD_PROFILE": "production"
+        "EAS_BUILD_PROFILE": "production",
+        "SHARP_IGNORE_GLOBAL_LIBVIPS": "1",
+        "EXPO_PUBLIC_ADMOB_ANDROID_APP_ID": "ca-app-pub-9739538371596860~9642076907",
+        "EXPO_PUBLIC_ADMOB_IOS_APP_ID": "ca-app-pub-9739538371596860~7532742718"
+      }
+    },
+    "ios-simulator": {
+      "extends": "production",
+      "distribution": "internal",
+      "withoutCredentials": true,
+      "ios": {
+        "simulator": true,
+        "resourceClass": "m-medium"
+      },
+      "env": {
+        "EAS_BUILD_PROFILE": "ios-simulator"
       }
     }
   },

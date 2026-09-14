@@ -1,8 +1,8 @@
 # Geeta Param Seva
 
-Private, invitation-only community app for **Geeta Param Seva** — seva updates, group messages, Adhyay/Aarti practice, Gita reading, and admin coordination.
+Publicly downloadable community app for **Geeta Param Seva** — anyone can apply to join; admins approve membership. Approved members get seva updates, group messages, Adhyay/Aarti practice, Gita reading, and admin coordination tools.
 
-Built with **Expo Router (SDK 57)**, **React Native**, **Firebase** (Auth custom tokens, Firestore, Cloud Functions, Remote Config), and optional **AdMob** banner ads.
+Built with **Expo Router (SDK 57)**, **React Native**, **Firebase** (Auth custom tokens, Firestore, Cloud Functions, Remote Config), and optional **AdMob** banner ads (non-personalized; no App Tracking Transparency).
 
 > **Proprietary software.** All rights reserved. You may not use, copy, modify, or distribute this codebase without prior written permission. Contact: [Sparshagrawaln@gmail.com](mailto:Sparshagrawaln@gmail.com)
 
@@ -31,11 +31,13 @@ Built with **Expo Router (SDK 57)**, **React Native**, **Firebase** (Auth custom
 mindmap
   root((Geeta Param Seva))
     Members
+      Apply to join
       Group feed
       Practice today
       Gita / Aarti
       Push alerts
     Admins
+      Join applications
       Roster + join PINs
       Seva posts
       Practice assign
@@ -47,10 +49,10 @@ mindmap
     Platform
       Expo app
       Firebase
-      AdMob banners
+      AdMob banners (NPA)
 ```
 
-Geeta Param Seva is **not** a public social network. A phone number must already be on the organization roster before anyone can sign in.
+Geeta Param Seva is a **moderated community**: anyone may download the app and submit a join application (name + phone). Community features require admin approval, roster placement, and sign-in with phone + PIN.
 
 ---
 
@@ -58,13 +60,13 @@ Geeta Param Seva is **not** a public social network. A phone number must already
 
 | Area | What you get |
 |------|----------------|
-| **Auth** | Phone + group join PIN (members); personal PIN for admins after first login; sole-device session |
+| **Auth** | Apply to join (name + phone); phone + group join PIN (members); personal PIN for admins after first login; sole-device session |
 | **Feed** | Seva posts, messages, and alerts scoped to groups |
 | **Practice** | Standing Adhyay / Aarti assignments with completion tracking |
 | **Scripture** | In-app Gita chapters and verses |
 | **i18n** | English + Hindi (with optional machine-assisted strings) |
-| **Ads** | Member-only banner ads (Remote Config kill switch); never on reading / auth screens |
-| **Admin** | Roster, join PIN rotation, content publishing, practice overview |
+| **Ads** | Member-only non-personalized banner ads (Remote Config kill switch); never on reading / auth screens; no ATT / IDFA tracking |
+| **Admin** | Join applications, roster, join PIN rotation, content publishing, practice overview |
 
 ```mermaid
 flowchart LR
@@ -164,11 +166,11 @@ sequenceDiagram
   participant CF as signInWithGroupPin
   participant FS as Firestore
 
-  U->>App: Phone + join / personal PIN
-  App->>CF: callable
-  CF->>FS: roster / senior_admins + pin_hashes
-  CF-->>App: Firebase custom token
-  App->>App: sole-device session + profile
+  U->>App: Apply (name + phone) or Sign in (phone + PIN)
+  App->>CF: submitJoinApplication or signInWithGroupPin
+  CF->>FS: join_applications / roster / senior_admins + pin_hashes
+  CF-->>App: ok or Firebase custom token
+  App->>App: sole-device session + profile (after sign-in)
   alt Member
     App-->>U: (user) home / seva / practice
   else Admin / Senior
@@ -178,8 +180,9 @@ sequenceDiagram
 
 | Role | Access |
 |------|--------|
-| **Senior admin** | All groups; roster (members + admins); PINs; practice overview |
-| **Admin** | Assigned groups; members; posts; practice |
+| **Applicant (signed out)** | Download app; submit join application |
+| **Senior admin** | All groups; join applications; roster (members + admins); PINs; practice overview |
+| **Admin** | Assigned groups; join applications; members; posts; practice |
 | **Member** | Own group feed; today’s practice; polls; alerts |
 
 Seniors are seeded only via Admin SDK scripts — never created inside the app UI.
@@ -231,12 +234,14 @@ cp scripts/data/senior-admins.example.json scripts/data/senior-admins.local.json
 SENIOR_ADMIN_PIN=****** HRIDYA_SENIOR_ADMIN_PIN=****** node scripts/seed-senior-admin.cjs
 ```
 
-QA accounts (placeholders — override with env if needed):
+QA / App Review accounts (valid Indian mobiles — override with env if needed):
 
 ```bash
+# Deploy functions first if member personal-PIN login is not yet live, then:
 node scripts/seed-test-accounts.cjs
-# Admin:  +911111111111 / personal PIN 111111
-# Member: +912222222222 / join PIN 222222
+# Admin:  +919876500001 / personal PIN 111111
+# Member: +919876500002 / personal PIN 222222
+# (attached to existing group-1; no QA test group)
 ```
 
 ---
@@ -269,7 +274,7 @@ Custom notification sound and production AdMob require a **development or EAS bu
 npm run deploy:backend
 ```
 
-Important callables include: `signInWithGroupPin`, `generateGroupJoinPin`, `setPersonalPin`, roster upsert/deactivate, practice assignment/completion/reminder, `wipeDailyFeed`, `deleteAccount`.
+Important callables include: `submitJoinApplication`, `listJoinApplications`, `rejectJoinApplication`, `markJoinApplicationAdded`, `signInWithGroupPin`, `generateGroupJoinPin`, `setPersonalPin`, roster upsert/deactivate, practice assignment/completion/reminder, `wipeDailyFeed`, `deleteAccount`.
 
 ---
 

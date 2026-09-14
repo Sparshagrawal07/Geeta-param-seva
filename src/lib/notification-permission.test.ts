@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import { shouldRequestNotificationPermission } from '@/lib/notification-permission';
+import {
+  notificationSoundAllowed,
+  shouldRequestNotificationPermission,
+} from '@/lib/notification-permission';
 
 describe('shouldRequestNotificationPermission', () => {
   it('does not ask when already granted', () => {
@@ -52,6 +55,39 @@ describe('shouldRequestNotificationPermission', () => {
         { granted: false, status: 'denied', canAskAgain: true },
         true
       )
+    ).toBe(true);
+  });
+});
+
+describe('notificationSoundAllowed', () => {
+  it('requires granted status', () => {
+    expect(notificationSoundAllowed({ granted: false, status: 'denied' })).toBe(false);
+    expect(notificationSoundAllowed({ granted: true, status: 'granted' })).toBe(true);
+  });
+
+  it('fails when iOS Sounds toggle is off', () => {
+    expect(
+      notificationSoundAllowed({
+        granted: true,
+        status: 'granted',
+        ios: { allowsSound: false },
+      })
+    ).toBe(false);
+  });
+
+  it('passes when iOS Sounds are enabled or unspecified', () => {
+    expect(
+      notificationSoundAllowed({
+        granted: true,
+        status: 'granted',
+        ios: { allowsSound: true },
+      })
+    ).toBe(true);
+    expect(
+      notificationSoundAllowed({
+        status: 'granted',
+        ios: { allowsSound: null },
+      })
     ).toBe(true);
   });
 });

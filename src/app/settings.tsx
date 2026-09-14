@@ -24,6 +24,7 @@ export default function SettingsScreen() {
       title={t('settingsTitle')}
       showBack
       animateContent={false}
+      edges={['top', 'bottom']}
       contentClassName="px-5 pb-10 pt-2">
       <SpiritualSurface>
         <SpiritualSurfaceBody className="py-4">

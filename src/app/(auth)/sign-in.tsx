@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { View } from 'react-native';
 
+import { ApplyToJoinSheet } from '@/components/auth/apply-to-join-sheet';
 import { AppBrand } from '@/components/app-brand';
 import { LegalLinks } from '@/components/legal/legal-links';
 import { LanguageToggle } from '@/components/language-toggle';
@@ -38,6 +39,7 @@ export default function SignInScreen() {
   const [pin, setPin] = useState('');
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [applyOpen, setApplyOpen] = useState(false);
 
   const handlePhoneChange = (value: string) => {
     setPhoneDigits(sanitizeIndianMobileDigits(value));
@@ -144,6 +146,21 @@ export default function SignInScreen() {
                     </AppText>
                     <LegalLinks className="justify-center" />
                     <AppButton label={t('signIn')} loading={loading} fullWidth onPress={() => void handleSignIn()} />
+                    <View className="mt-2 gap-2">
+                      <AppText className="text-center text-sm leading-6 text-gp-muted dark:text-gp-muted-dark">
+                        {t('signInCommunityHint')}
+                      </AppText>
+                      <AppButton
+                        label={t('applyToJoinCta')}
+                        variant="secondary"
+                        fullWidth
+                        disabled={loading}
+                        onPress={() => {
+                          void triggerHaptic('light');
+                          setApplyOpen(true);
+                        }}
+                      />
+                    </View>
                   </View>
                 </View>
               </SpiritualSurfaceBody>
@@ -151,6 +168,8 @@ export default function SignInScreen() {
           </FadeInView>
         </View>
       </View>
+
+      <ApplyToJoinSheet visible={applyOpen} onClose={() => setApplyOpen(false)} />
     </SpiritualAuthShell>
   );
 }

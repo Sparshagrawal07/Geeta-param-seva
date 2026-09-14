@@ -253,6 +253,11 @@ service cloud.firestore {
       allow create, update, delete: if false;
     }
 
+    // Join applications — Cloud Functions only (public submit + admin review via callables).
+    match /join_applications/{phoneId} {
+      allow read, write: if false;
+    }
+
     match /senior_admins/{phoneId} {
       allow read, write: if false;
     }

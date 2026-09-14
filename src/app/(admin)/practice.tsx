@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GroupScopeSelector } from '@/components/admin/group-scope-selector';
 import { PracticeAssignmentPicker } from '@/components/practice/practice-assignment-picker';
+import { PracticeWhatsAppCopyButton } from '@/components/practice/practice-whatsapp-copy-button';
 import { FormSection, FormStack } from '@/components/layout/form-stack';
 import { Screen } from '@/components/layout/screen';
 import { SpiritualSurface, SpiritualSurfaceBody } from '@/components/spiritual/spiritual-surface';
@@ -25,6 +27,7 @@ import {
   type PracticeMemberOverviewRow,
   validatePracticeItems,
 } from '@/lib/practice';
+import { formatIncompletePracticeWhatsAppMessage } from '@/lib/practice-whatsapp';
 import { useAlert } from '@/providers/alert-provider';
 import { useLocale } from '@/providers/locale-provider';
 import {
@@ -186,6 +189,27 @@ export default function AdminPracticeScreen() {
     }
   };
 
+  const handleCopyIncompleteWhatsApp = async () => {
+    const text = formatIncompletePracticeWhatsAppMessage(members, {
+      practiceDateKey: practiceDateKey || undefined,
+      title: t('practiceCopyIncompleteWhatsAppTitle'),
+    });
+    if (!text) {
+      setError(t('practiceCopyIncompleteEmpty'));
+      void triggerHaptic('error');
+      return;
+    }
+    try {
+      await Clipboard.setStringAsync(text);
+      clearMessage();
+      showSuccess(t('practiceCopyIncompleteSuccess'));
+      void triggerHaptic('success');
+    } catch {
+      setError(t('errorUnexpected'));
+      void triggerHaptic('error');
+    }
+  };
+
   const handleDownloadReport = async () => {
     if (!selectedGroupId) {
       setError(t('selectGroup'));
@@ -265,6 +289,11 @@ export default function AdminPracticeScreen() {
                     fullWidth
                   />
                 ) : null}
+                <PracticeWhatsAppCopyButton
+                  disabled={!selectedGroupId || incompleteCount === 0}
+                  label={t('practiceCopyIncompleteWhatsApp')}
+                  onPress={() => void handleCopyIncompleteWhatsApp()}
+                />
                 <AppButton
                   label={t('practiceDownloadReport')}
                   variant="secondary"
@@ -398,7 +427,7 @@ export default function AdminPracticeScreen() {
       </SpiritualSurface>
 
       <Modal visible={Boolean(editMember)} animationType="slide" onRequestClose={() => setEditMember(null)}>
-        <SafeAreaView className="flex-1 bg-gp-bg dark:bg-gp-bg-dark">
+        <SafeAreaView className="flex-1 bg-gp-bg dark:bg-gp-bg-dark" edges={['top', 'bottom']}>
           <View className="flex-row items-center justify-between border-b border-gp-border px-5 py-3 dark:border-gp-border-dark">
             <AppText bold className="text-lg text-gp-text dark:text-gp-text-dark">
               {editMember?.name ?? t('practiceEditAssignment')}

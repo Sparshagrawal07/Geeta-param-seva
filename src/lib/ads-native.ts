@@ -2,7 +2,13 @@ import type { ComponentType } from 'react';
 import { Platform } from 'react-native';
 
 export type AdsNativeModule = {
-  mobileAds: () => { initialize: () => Promise<unknown> };
+  mobileAds: () => {
+    initialize: () => Promise<unknown>;
+    setRequestConfiguration?: (config: {
+      tagForChildDirectedTreatment?: boolean;
+      tagForUnderAgeOfConsent?: boolean;
+    }) => Promise<unknown>;
+  };
   BannerAd: ComponentType<{
     unitId: string;
     size: string;

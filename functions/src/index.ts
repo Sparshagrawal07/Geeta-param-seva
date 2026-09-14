@@ -42,6 +42,12 @@ import {
   getPracticeMonthlyReportCore,
   notifyPracticeMonthlyReportCore,
 } from './practice-report';
+import {
+  listJoinApplicationsCore,
+  markJoinApplicationAddedCore,
+  rejectJoinApplicationCore,
+  submitJoinApplicationCore,
+} from './join-applications';
 
 const region = 'asia-south1';
 
@@ -222,6 +228,71 @@ export const deactivateAccessRoster = onCall(callableOptions, async (request) =>
       throw new HttpsError('unauthenticated', 'Sign in required.');
     }
     return await deactivateAccessRosterEntry({
+      actorUid: request.auth.uid,
+      phoneNumber: request.data?.phoneNumber,
+    });
+  } catch (error) {
+    throw toHttpsError(error);
+  }
+});
+
+/** Public: submit name + phone to apply for community membership. */
+export const submitJoinApplication = onCall(callableOptions, async (request) => {
+  try {
+    return await submitJoinApplicationCore({
+      name: request.data?.name,
+      phoneNumber: request.data?.phoneNumber,
+    });
+  } catch (error) {
+    throw toHttpsError(error);
+  }
+});
+
+/** Admin: list join applications (default pending). */
+export const listJoinApplications = onCall(callableOptions, async (request) => {
+  try {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required.');
+    }
+    const status =
+      request.data?.status === 'pending' ||
+      request.data?.status === 'rejected' ||
+      request.data?.status === 'added' ||
+      request.data?.status === 'all'
+        ? request.data.status
+        : 'pending';
+    return await listJoinApplicationsCore({
+      actorUid: request.auth.uid,
+      status,
+      pageSize: typeof request.data?.pageSize === 'number' ? request.data.pageSize : undefined,
+    });
+  } catch (error) {
+    throw toHttpsError(error);
+  }
+});
+
+/** Admin: reject a join application. */
+export const rejectJoinApplication = onCall(callableOptions, async (request) => {
+  try {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required.');
+    }
+    return await rejectJoinApplicationCore({
+      actorUid: request.auth.uid,
+      phoneNumber: request.data?.phoneNumber,
+    });
+  } catch (error) {
+    throw toHttpsError(error);
+  }
+});
+
+/** Admin: mark application added after roster save from Approve & Add. */
+export const markJoinApplicationAdded = onCall(callableOptions, async (request) => {
+  try {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required.');
+    }
+    return await markJoinApplicationAddedCore({
       actorUid: request.auth.uid,
       phoneNumber: request.data?.phoneNumber,
     });

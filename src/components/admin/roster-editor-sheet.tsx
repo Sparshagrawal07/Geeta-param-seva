@@ -39,11 +39,13 @@ interface RosterEditorSheetProps {
   defaultGroupId?: string | null;
   /** When editing an existing roster entry. */
   editing?: AccessRosterEntry | null;
+  /** Prefill for new member from a join application (ignored when editing). */
+  prefill?: { name: string; phoneNumber: string } | null;
   /** Admin role users can only assign members to these groups. */
   allowedGroupIds?: string[];
   allowAdminCreate: boolean;
   onClose: () => void;
-  onSaved: () => void | Promise<void>;
+  onSaved: (saved: { phoneNumber: string; name: string }) => void | Promise<void>;
   onSuccess: (message: string) => void;
   onError: (message: string) => void;
 }
@@ -54,6 +56,7 @@ export function RosterEditorSheet({
   groups,
   defaultGroupId,
   editing = null,
+  prefill = null,
   allowedGroupIds,
   allowAdminCreate,
   onClose,
@@ -83,10 +86,9 @@ export function RosterEditorSheet({
     if (!visible) return;
 
     setMode(editing ? (editing.role === 'admin' ? 'admin' : 'member') : initialMode);
-    setName(editing?.name ?? '');
-    setPhoneDigits(
-      editing?.phoneNumber ? sanitizeIndianMobileDigits(editing.phoneNumber.replace(/^\+91/, '')) : ''
-    );
+    setName(editing?.name ?? prefill?.name ?? '');
+    const sourcePhone = editing?.phoneNumber ?? prefill?.phoneNumber ?? '';
+    setPhoneDigits(sourcePhone ? sanitizeIndianMobileDigits(sourcePhone.replace(/^\+91/, '')) : '');
     setGroupId(editing?.groupId ?? defaultGroupId ?? availableGroups[0]?.id ?? null);
     setAssignedGroupIds(
       editing?.assignedGroupIds?.length
@@ -109,7 +111,7 @@ export function RosterEditorSheet({
         })
         .catch(() => undefined);
     }
-  }, [availableGroups, defaultGroupId, editing, initialMode, visible]);
+  }, [availableGroups, defaultGroupId, editing, initialMode, prefill, visible]);
 
   const title = (() => {
     if (mode === 'choose') return t('addPersonTitle');
@@ -174,7 +176,7 @@ export function RosterEditorSheet({
         });
       }
       onClose();
-      await onSaved();
+      await onSaved({ phoneNumber, name: trimmedName });
       onSuccess(editing ? t('rosterUpdated') : t('rosterSaved'));
       void triggerHaptic('success');
     } catch (caught) {
@@ -193,7 +195,7 @@ export function RosterEditorSheet({
       setDeactivating(true);
       await deactivateAccessRosterRemote(editing.phoneNumber);
       onClose();
-      await onSaved();
+      await onSaved({ phoneNumber: editing.phoneNumber, name: editing.name });
       onSuccess(t('rosterDeactivated'));
       void triggerHaptic('success');
     } catch (caught) {

@@ -50,10 +50,12 @@ const config = {
   userInterfaceStyle: 'automatic',
   ios: {
     bundleIdentifier: APP_PACKAGE,
-    buildNumber: '1',
     googleServicesFile: './GoogleService-Info.plist',
     icon: ICON,
     supportsTablet: false,
+    entitlements: {
+      'aps-environment': 'production',
+    },
     infoPlist: {
       CFBundleDisplayName: APP_NAME,
       ITSAppUsesNonExemptEncryption: false,
@@ -78,7 +80,12 @@ const config = {
       backgroundColor: brandPalette.iconBackground,
       foregroundImage: ADAPTIVE_ICON,
     },
-    permissions: ['android.permission.POST_NOTIFICATIONS', 'android.permission.VIBRATE'],
+    permissions: [
+      'android.permission.POST_NOTIFICATIONS',
+      'android.permission.VIBRATE',
+      'android.permission.RECEIVE_BOOT_COMPLETED',
+      'android.permission.WAKE_LOCK',
+    ],
     predictiveBackGestureEnabled: false,
   },
   web: {
@@ -109,7 +116,9 @@ const config = {
         sounds: ['./assets/sounds/community_reminder.wav'],
         icon: NOTIFICATION_ICON,
         color: brandPalette.primary,
-        defaultChannel: 'community-reminders-v2',
+        defaultChannel: 'community-reminders-v4',
+        // Ensures remote alerts can wake the app; custom sounds still need a store/dev build.
+        enableBackgroundRemoteNotifications: true,
       },
     ],
     [
@@ -126,6 +135,8 @@ const config = {
         ios: {
           // Required by react-native-google-mobile-ads on Expo.
           useFrameworks: 'static',
+          deploymentTarget: '16.4',
+          privacyManifestAggregationEnabled: true,
         },
       },
     ],

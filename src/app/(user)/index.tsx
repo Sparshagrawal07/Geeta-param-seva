@@ -69,14 +69,15 @@ export default function UserHomeScreen() {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-gp-bg dark:bg-gp-bg-dark" edges={['bottom']}>
+    <View className="flex-1 bg-gp-bg dark:bg-gp-bg-dark">
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingBottom: 24 }}
+        contentContainerStyle={{ paddingBottom: 28 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void handleRefresh()} />}>
         <HomeHeroSection name={profile?.name ?? ''} />
 
-        <View className="relative z-20 px-5">
+        {/* Practice CTA stack sits above decorative feather; ads never share this layer. */}
+        <View className="relative z-30 px-5" collapsable={false}>
           {error ? (
             <View className="mb-4">
               <ErrorState message={error} onRetry={() => void load()} />
@@ -88,12 +89,13 @@ export default function UserHomeScreen() {
           </View>
 
           <GitaExploreEntry />
+        </View>
 
-          {/* Scroll-bound banners only — never sticky near tab bar or Mark complete. */}
+        {/* Ads only after all primary UI — single banner, scroll-bound, no z-index fight. */}
+        <View className="z-0 mt-10 px-5 pb-2" pointerEvents="box-none">
           <SafeBannerAd screen="home" slot={1} />
-          <SafeBannerAd screen="home" slot={2} />
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }

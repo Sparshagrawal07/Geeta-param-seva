@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
@@ -23,6 +23,12 @@ import { useTransientMessage } from '@/hooks/use-transient-message';
 import { triggerHaptic } from '@/lib/haptics';
 import { isSeniorAdmin } from '@/lib/users';
 import { useLocale } from '@/providers/locale-provider';
+import {
+  listJoinApplicationsRemote,
+  markJoinApplicationAddedRemote,
+  rejectJoinApplicationRemote,
+} from '@/services/join-applications';
+import type { JoinApplication } from '@/types/join-application';
 import type { AccessRosterEntry, RosterRole, RosterStatus } from '@/types/roster';
 import type { MessageKey } from '@/lib/i18n/messages';
 
@@ -48,6 +54,12 @@ export default function AdminMembersScreen() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetMode, setSheetMode] = useState<RosterEditorMode>('member');
   const [editing, setEditing] = useState<AccessRosterEntry | null>(null);
+  const [prefill, setPrefill] = useState<{ name: string; phoneNumber: string } | null>(null);
+  const [addingFromApplication, setAddingFromApplication] = useState(false);
+  const [applications, setApplications] = useState<JoinApplication[]>([]);
+  const [applicationsLoading, setApplicationsLoading] = useState(true);
+  const [applicationsError, setApplicationsError] = useState('');
+  const [rejectingPhone, setRejectingPhone] = useState<string | null>(null);
   const { message: statusMessage, showSuccess, showNotice } = useTransientMessage();
 
   const isSenior = isSeniorAdmin(profile?.role);
@@ -64,9 +76,28 @@ export default function AdminMembersScreen() {
     search: debouncedSearch,
   });
 
+  const refreshApplications = useCallback(async () => {
+    try {
+      setApplicationsLoading(true);
+      setApplicationsError('');
+      const pending = await listJoinApplicationsRemote({ status: 'pending' });
+      setApplications(pending);
+    } catch {
+      setApplicationsError(t('joinApplicationsLoadFailed'));
+    } finally {
+      setApplicationsLoading(false);
+    }
+  }, [t]);
+
+  useEffect(() => {
+    void refreshApplications();
+  }, [refreshApplications]);
+
   const openAdd = () => {
     void triggerHaptic('light');
     setEditing(null);
+    setPrefill(null);
+    setAddingFromApplication(false);
     setSheetMode(isSenior ? 'choose' : 'member');
     setSheetOpen(true);
   };
@@ -74,8 +105,34 @@ export default function AdminMembersScreen() {
   const openEdit = (entry: AccessRosterEntry) => {
     void triggerHaptic('selection');
     setEditing(entry);
+    setPrefill(null);
+    setAddingFromApplication(false);
     setSheetMode(entry.role === 'admin' ? 'admin' : 'member');
     setSheetOpen(true);
+  };
+
+  const openApproveAndAdd = (application: JoinApplication) => {
+    void triggerHaptic('light');
+    setEditing(null);
+    setPrefill({ name: application.name, phoneNumber: application.phoneNumber });
+    setAddingFromApplication(true);
+    setSheetMode('member');
+    setSheetOpen(true);
+  };
+
+  const handleReject = async (application: JoinApplication) => {
+    try {
+      setRejectingPhone(application.phoneNumber);
+      await rejectJoinApplicationRemote(application.phoneNumber);
+      showSuccess(t('joinApplicationRejected'));
+      void triggerHaptic('success');
+      await refreshApplications();
+    } catch {
+      showNotice(t('joinApplicationRejectFailed'));
+      void triggerHaptic('error');
+    } finally {
+      setRejectingPhone(null);
+    }
   };
 
   const groupLabel = (entry: AccessRosterEntry) => {
@@ -110,6 +167,64 @@ export default function AdminMembersScreen() {
       {statusMessage ? (
         <AppText className="mt-4 text-sm text-gp-muted dark:text-gp-muted-dark">{statusMessage}</AppText>
       ) : null}
+
+      <View style={{ marginTop: SECTION_GAP }}>
+        <SectionHeader title={t('joinApplicationsTitle')} subtitle={t('joinApplicationsSubtitle')} />
+
+        {applicationsLoading ? (
+          <View className="items-center py-4">
+            <AppSpinner size="md" />
+          </View>
+        ) : null}
+
+        {applicationsError ? (
+          <ErrorState message={applicationsError} onRetry={() => void refreshApplications()} />
+        ) : null}
+
+        {!applicationsLoading && !applicationsError && applications.length === 0 ? (
+          <EmptyState title={t('joinApplicationsEmpty')} message={t('joinApplicationsEmptyMessage')} />
+        ) : null}
+
+        {!applicationsLoading && !applicationsError && applications.length > 0 ? (
+          <View className="gap-3">
+            {applications.map((application) => (
+              <SpiritualSurface key={application.id} variant="elevated">
+                <SpiritualSurfaceBody className="gap-3 py-3.5">
+                  <View className="flex-row items-center gap-3">
+                    <View className="h-10 w-10 items-center justify-center rounded-full bg-saffron/12 dark:bg-gold/15">
+                      <Ionicons name="mail-unread-outline" size={18} color={colors.saffron} />
+                    </View>
+                    <View className="min-w-0 flex-1">
+                      <AppText bold className="text-base text-gp-text dark:text-gp-text-dark">
+                        {application.name}
+                      </AppText>
+                      <AppText className="text-sm text-gp-muted dark:text-gp-muted-dark">
+                        {application.phoneNumber}
+                      </AppText>
+                    </View>
+                  </View>
+                  <View className="gap-2">
+                    <AppButton
+                      label={t('joinApplicationApproveAdd')}
+                      fullWidth
+                      size="sm"
+                      onPress={() => openApproveAndAdd(application)}
+                    />
+                    <AppButton
+                      label={t('joinApplicationReject')}
+                      variant="secondary"
+                      fullWidth
+                      size="sm"
+                      loading={rejectingPhone === application.phoneNumber}
+                      onPress={() => void handleReject(application)}
+                    />
+                  </View>
+                </SpiritualSurfaceBody>
+              </SpiritualSurface>
+            ))}
+          </View>
+        ) : null}
+      </View>
 
       <SpiritualSurface variant="elevated" className="mt-7">
         <SpiritualSurfaceBody className="py-4">
@@ -232,13 +347,28 @@ export default function AdminMembersScreen() {
         groups={groups}
         defaultGroupId={selectedGroupId}
         editing={editing}
+        prefill={prefill}
         allowedGroupIds={isSenior ? undefined : profile?.assignedGroupIds}
         allowAdminCreate={isSenior}
         onClose={() => {
           setSheetOpen(false);
           setEditing(null);
+          setPrefill(null);
+          setAddingFromApplication(false);
         }}
-        onSaved={() => void refresh()}
+        onSaved={async (saved) => {
+          await refresh();
+          if (addingFromApplication) {
+            try {
+              await markJoinApplicationAddedRemote(saved.phoneNumber);
+              showSuccess(t('joinApplicationAdded'));
+            } catch {
+              // Roster save already succeeded; still refresh pending list.
+            }
+            setAddingFromApplication(false);
+            await refreshApplications();
+          }
+        }}
         onSuccess={showSuccess}
         onError={showNotice}
       />

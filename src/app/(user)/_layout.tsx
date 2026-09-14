@@ -1,49 +1,23 @@
-import { View } from 'react-native';
 import { Redirect, Tabs } from 'expo-router';
 
 import { DevotionalTabIcon } from '@/components/navigation/devotional-tab-icon';
-import { SpiritualAssetImage } from '@/components/spiritual/spiritual-asset-image';
+import { useSpiritualTabBarScreenOptions } from '@/components/navigation/spiritual-tab-bar';
 import { LoadingScreen } from '@/components/ui/loading-screen';
 import { useAndroidBackExit } from '@/hooks/use-android-back-exit';
 import { useAuth } from '@/hooks/use-auth';
 import { useSevaTabBadge } from '@/hooks/use-seva-tab-badge';
 import { isAdminRole, profileNeedsName } from '@/lib/users';
-import { spiritualTabBar } from '@/lib/spiritual-ui';
 import { useLocale } from '@/providers/locale-provider';
-
-function TabBarLotusBackdrop() {
-  return (
-    <View className="absolute inset-0 overflow-hidden bg-gp-tab">
-      <SpiritualAssetImage slot="navLotusBg" />
-    </View>
-  );
-}
 
 function UserTabs() {
   const { t } = useLocale();
   useAndroidBackExit();
   const { hasUnread, refresh, clearBadge } = useSevaTabBadge();
+  const tabBarOptions = useSpiritualTabBarScreenOptions();
 
   return (
     <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: spiritualTabBar.active,
-        tabBarInactiveTintColor: spiritualTabBar.inactive,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '600', marginTop: 2, marginBottom: 0 },
-        tabBarItemStyle: { paddingTop: 2, height: 52 },
-        tabBarIconStyle: { marginTop: 0 },
-        tabBarStyle: {
-          backgroundColor: spiritualTabBar.background,
-          borderTopColor: spiritualTabBar.border,
-          borderTopWidth: 1,
-          height: 64,
-          paddingTop: 4,
-          paddingBottom: 6,
-          overflow: 'hidden',
-        },
-        tabBarBackground: () => <TabBarLotusBackdrop />,
-      }}
+      screenOptions={tabBarOptions}
       screenListeners={{
         focus: () => {
           void refresh();

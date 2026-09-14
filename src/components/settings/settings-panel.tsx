@@ -124,6 +124,9 @@ interface SettingsPanelProps {
   phoneNumber?: string;
 }
 
+/** Hidden in UI for now; keep wiring for store account-deletion compliance. */
+const DELETE_ACCOUNT_VISIBLE = false;
+
 export function SettingsPanel({ showProfileSummary = false, name, phoneNumber }: SettingsPanelProps) {
   const { profile, signOutUser } = useAuth();
   const { t } = useLocale();
@@ -136,6 +139,7 @@ export function SettingsPanel({ showProfileSummary = false, name, phoneNumber }:
     requestPermissions,
     setNotificationsEnabled,
     previewReminderSound,
+    openSystemNotificationSettings,
   } = useNotificationsSetup();
   const [busy, setBusy] = useState(false);
 
@@ -146,15 +150,24 @@ export function SettingsPanel({ showProfileSummary = false, name, phoneNumber }:
         ? t('notificationsOn')
         : t('notificationsMuted');
 
+  const showPermissionHelp = (soundDenied = false) => {
+    confirm({
+      title: t('notificationsPermissionTitle'),
+      message: soundDenied ? t('notificationsSoundDenied') : t('notificationsPermissionDenied'),
+      confirmLabel: t('openSystemSettings'),
+      cancelLabel: t('cancel'),
+      onConfirm: () => {
+        void openSystemNotificationSettings();
+      },
+    });
+  };
+
   const handleEnableNotifications = async () => {
     try {
       setBusy(true);
       const granted = await requestPermissions();
       if (!granted) {
-        alert({
-          title: t('notificationsPermissionTitle'),
-          message: t('notificationsPermissionDenied'),
-        });
+        showPermissionHelp(permissionStatus === 'granted');
         return;
       }
       await setNotificationsEnabled(true);
@@ -180,15 +193,21 @@ export function SettingsPanel({ showProfileSummary = false, name, phoneNumber }:
   const handlePreviewSound = async () => {
     try {
       setBusy(true);
-      const granted = permissionStatus === 'granted' ? true : await requestPermissions();
+      const granted = await requestPermissions();
       if (!granted) {
-        alert({
-          title: t('notificationsPermissionTitle'),
-          message: t('notificationsPermissionDenied'),
-        });
+        showPermissionHelp(permissionStatus === 'granted');
         return;
       }
       await previewReminderSound();
+    } catch (error) {
+      if (error instanceof Error && error.message === 'NOTIFICATION_SOUND_DENIED') {
+        showPermissionHelp(true);
+        return;
+      }
+      alert({
+        title: t('notificationsPermissionTitle'),
+        message: t('previewReminderSoundExpoGo'),
+      });
     } finally {
       setBusy(false);
     }
@@ -290,13 +309,15 @@ export function SettingsPanel({ showProfileSummary = false, name, phoneNumber }:
             showChevron
           />
         ) : null}
-        <SettingsRow label={t('signOut')} onPress={handleSignOut} />
-        <SettingsRow
-          label={t('deleteAccount')}
-          onPress={handleDeleteAccount}
-          destructive
-          last
-        />
+        <SettingsRow label={t('signOut')} onPress={handleSignOut} last={!DELETE_ACCOUNT_VISIBLE} />
+        {DELETE_ACCOUNT_VISIBLE ? (
+          <SettingsRow
+            label={t('deleteAccount')}
+            onPress={handleDeleteAccount}
+            destructive
+            last
+          />
+        ) : null}
       </SettingsSection>
 
       <SettingsSection title={t('legalSectionTitle')}>

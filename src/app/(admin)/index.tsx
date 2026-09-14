@@ -89,7 +89,6 @@ export default function AdminDashboardScreen() {
   return (
     <Screen
       contentClassName="relative px-0 pb-10 pt-0"
-      edges={['bottom']}
       animateContent={false}>
       <HomeHeroSection
         name={profile?.name ?? ''}

@@ -69,9 +69,13 @@ describe('store compliance: legal and account deletion', () => {
     expect(adminPrivacy).toMatch(/personal pin|roster|sole/);
     expect(adminTerms).toMatch(/personal pin|join pin|admin/);
     expect(memberPrivacy).toMatch(/join pin|account deletion|children|audience/);
+    expect(memberPrivacy).toMatch(/apply|admin approv|moderated/);
     expect(memberPrivacy).toMatch(/admob|advertising|banner/);
+    expect(memberPrivacy).toMatch(/tracking|non-personalized|idfa|app tracking transparency/);
     expect(adminPrivacy).toMatch(/admob|advertising|banner/);
-    expect(memberTerms).toMatch(/advertising|banner/);
+    expect(memberTerms).toMatch(/advertising|banner|apply/);
+    expect(memberTerms).toMatch(/download|apply to join|approved/);
+    expect(memberPrivacy).not.toMatch(/invitation-only/);
     expect(memberTerms).not.toEqual(adminTerms);
     expect(resolveLegalAudience('user')).toBe('member');
     expect(resolveLegalAudience('admin')).toBe('admin');
@@ -146,6 +150,7 @@ describe('store compliance: no production auth bypasses', () => {
     const signIn = readFileSync(path.join(SRC, 'app/(auth)/sign-in.tsx'), 'utf8');
     expect(signIn).not.toMatch(/signInForTesting|isTestAuthEnabled|testSignIn|Dev bypass|devOtp/i);
     expect(signIn).toContain('signInWithPhoneAndGroupPin');
+    expect(signIn).toContain('ApplyToJoinSheet');
     expect(signIn).toContain('LegalLinks');
     expect(signIn).not.toMatch(/whatsapp|msg91|sendWhatsAppOtp|ALLOW_OTP_DEV_MODE|Recaptcha|confirmPhoneOtp/i);
   });
@@ -204,7 +209,12 @@ describe('store compliance: app config', () => {
     expect(expo.android.package).toBe('com.geetaparamseva.app');
     expect(expo.ios.config.usesNonExemptEncryption).toBe(false);
     expect(expo.ios.infoPlist.ITSAppUsesNonExemptEncryption).toBe(false);
+    expect(expo.ios.infoPlist.NSUserTrackingUsageDescription).toBeUndefined();
     expect(expo.ios.privacyManifests.NSPrivacyAccessedAPITypes.length).toBeGreaterThan(0);
+    const admobPlugin = expo.plugins.find(
+      (plugin: unknown) => Array.isArray(plugin) && plugin[0] === 'react-native-google-mobile-ads'
+    ) as [string, Record<string, unknown>] | undefined;
+    expect(admobPlugin?.[1]?.userTrackingUsageDescription).toBeUndefined();
     expect(expo.plugins.some((plugin: unknown) => Array.isArray(plugin) && plugin[0] === 'expo-notifications')).toBe(
       true
     );

@@ -20,10 +20,11 @@ export function HomeHeroSection({ name, showNotificationBell, rightAction }: Hom
         rightAction={rightAction}
       />
 
+      {/* Decorative only — keep clear of the Mark-complete CTA hit area. */}
       <View
         pointerEvents="none"
-        className="absolute right-0 z-10"
-        style={{ bottom: -108, width: 124, height: 218 }}>
+        className="absolute right-0 z-0"
+        style={{ bottom: -72, width: 110, height: 170 }}>
         <SpiritualAssetImage slot="verseFeather" style={{ right: -4, top: 0 }} />
       </View>
     </View>

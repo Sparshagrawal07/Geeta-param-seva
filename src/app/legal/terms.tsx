@@ -19,6 +19,7 @@ export default function TermsOfServiceScreen() {
       showBack
       title={t('termsOfService')}
       animateContent={false}
+      edges={['top', 'bottom']}
       contentClassName="px-5 pb-10 pt-2">
       <SpiritualSurface>
         <SpiritualSurfaceBody className="py-4">

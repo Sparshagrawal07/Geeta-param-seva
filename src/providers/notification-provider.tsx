@@ -1,7 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
+import type {
+  EventSubscription,
+  NotificationPermissionsStatus,
+  PermissionStatus,
+} from 'expo-notifications';
 import { router, usePathname } from 'expo-router';
 import {
   createContext,
@@ -13,15 +17,23 @@ import {
   useState,
   type PropsWithChildren,
 } from 'react';
-import { AppState, InteractionManager, Platform } from 'react-native';
+import { AppState, InteractionManager, Linking, Platform } from 'react-native';
 
 import { isProtectedRoute } from '@/lib/auth-navigation';
-import { shouldRequestNotificationPermission } from '@/lib/notification-permission';
+import {
+  notificationSoundAllowed,
+  shouldRequestNotificationPermission,
+} from '@/lib/notification-permission';
 import { useAuth } from '@/hooks/use-auth';
+import {
+  getNotificationsModule,
+  isExpoGoRuntime,
+  notificationsAvailable,
+} from '@/lib/notifications-runtime';
 import { registerDisablePushOnSignOut } from '@/lib/push-signout';
 import {
   ANDROID_REMINDER_CHANNEL_ID,
-  ANDROID_REMINDER_CHANNEL_ID_LEGACY,
+  ANDROID_REMINDER_CHANNEL_IDS_LEGACY,
   ANDROID_REMINDER_CHANNEL_NAME,
   REMINDER_SOUND_FILENAME,
 } from '@/lib/push-constants';
@@ -32,23 +44,28 @@ import { setDeviceEnabled, upsertDeviceToken } from '@/services/devices';
 /** Marks that we already showed (or attempted) the OS notification permission dialog. */
 const NOTIFICATION_PERMISSION_ASKED_KEY = 'gps.notifications.permissionAsked.v1';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+const Notifications = getNotificationsModule();
+
+if (Notifications) {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
 
 interface NotificationContextValue {
-  permissionStatus: Notifications.PermissionStatus | null;
+  permissionStatus: PermissionStatus | null;
   expoPushToken: string | null;
   notificationsEnabled: boolean;
   requestPermissions: () => Promise<boolean>;
   setNotificationsEnabled: (enabled: boolean) => Promise<void>;
   previewReminderSound: () => Promise<void>;
+  openSystemNotificationSettings: () => Promise<void>;
   refreshPushRegistration: () => Promise<void>;
 }
 
@@ -62,16 +79,19 @@ function resolveProjectId(): string | undefined {
 }
 
 async function ensureAndroidChannel() {
-  if (Platform.OS !== 'android') return;
+  if (Platform.OS !== 'android' || !Notifications) return;
+
+  // Android channels are immutable — delete older ids so sound/importance updates apply.
+  for (const legacyId of ANDROID_REMINDER_CHANNEL_IDS_LEGACY) {
+    try {
+      await Notifications.deleteNotificationChannelAsync(legacyId);
+    } catch {
+      // Ignore if the legacy channel was never created.
+    }
+  }
 
   // Android 13+: the OS permission prompt will NOT appear until at least one
   // notification channel exists. Create the channel before any permission request.
-  try {
-    await Notifications.deleteNotificationChannelAsync(ANDROID_REMINDER_CHANNEL_ID_LEGACY);
-  } catch {
-    // Ignore if the legacy channel was never created.
-  }
-
   await Notifications.setNotificationChannelAsync(ANDROID_REMINDER_CHANNEL_ID, {
     name: ANDROID_REMINDER_CHANNEL_NAME,
     description: 'Seva reminders, practice alerts, and community updates',
@@ -80,7 +100,64 @@ async function ensureAndroidChannel() {
     enableVibrate: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: false,
+    // Must match a file registered via expo-notifications plugin `sounds`.
     sound: REMINDER_SOUND_FILENAME,
+    audioAttributes: {
+      usage: Notifications.AndroidAudioUsage.NOTIFICATION,
+      contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+      flags: {
+        enforceAudibility: true,
+        requestHardwareAudioVideoSynchronization: false,
+      },
+    },
+  });
+}
+
+const IOS_NOTIFICATION_PERMISSIONS = {
+  allowAlert: true,
+  allowBadge: true,
+  allowSound: true,
+  allowCriticalAlerts: false,
+  provideAppNotificationSettings: false,
+} as const;
+
+export async function openSystemNotificationSettings() {
+  try {
+    await Linking.openSettings();
+  } catch {
+    // Best-effort; some environments block Settings deep-links.
+  }
+}
+
+export async function previewReminderSound() {
+  if (!Notifications || isExpoGoRuntime()) {
+    // Custom sounds + channels are not available in Expo Go.
+    return;
+  }
+
+  await ensureAndroidChannel();
+
+  const permissions = await Notifications.getPermissionsAsync();
+  if (!notificationSoundAllowed(permissions)) {
+    throw new Error('NOTIFICATION_SOUND_DENIED');
+  }
+
+  // Short delay so the banner is delivered as a real system notification
+  // (more reliable for custom channel/bundle sounds than a pure foreground present).
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'Community reminder',
+      body: 'This is how reminder alerts will sound.',
+      sound: REMINDER_SOUND_FILENAME,
+      ...(Platform.OS === 'android'
+        ? { channelId: ANDROID_REMINDER_CHANNEL_ID }
+        : { interruptionLevel: 'timeSensitive' }),
+    },
+    trigger: {
+      type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+      seconds: 1,
+      channelId: Platform.OS === 'android' ? ANDROID_REMINDER_CHANNEL_ID : undefined,
+    },
   });
 }
 
@@ -101,12 +178,16 @@ async function navigateFromNotificationData(
   const screen = readDataString(data, 'screen')?.toLowerCase();
   const type = readDataString(data, 'type')?.toLowerCase();
 
-  if (type === 'practice_reminder' || type === 'practice_assigned' || type === 'practice_report' || screen === 'practice') {
+  if (
+    type === 'practice_reminder' ||
+    type === 'practice_assigned' ||
+    type === 'practice_report' ||
+    screen === 'practice'
+  ) {
     router.push((isAdmin ? '/(admin)/practice' : '/(user)') as never);
     return;
   }
 
-  // Legacy verse-system notifications → practice home
   if (
     type === 'verse_assigned' ||
     type === 'verse_reminder' ||
@@ -138,19 +219,6 @@ async function navigateFromNotificationData(
   router.push('/(user)');
 }
 
-export async function previewReminderSound() {
-  await ensureAndroidChannel();
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: 'Community reminder',
-      body: 'This is how reminder alerts will sound.',
-      sound: REMINDER_SOUND_FILENAME,
-      ...(Platform.OS === 'android' ? { channelId: ANDROID_REMINDER_CHANNEL_ID } : {}),
-    },
-    trigger: null,
-  });
-}
-
 export function AuthNavigationBoundary({ children }: PropsWithChildren) {
   const { profile, loading } = useAuth();
   const pathname = usePathname();
@@ -167,16 +235,12 @@ export function AuthNavigationBoundary({ children }: PropsWithChildren) {
 
 export function NotificationProvider({ children }: PropsWithChildren) {
   const { profile, loading: authLoading } = useAuth();
-  const [permissionStatus, setPermissionStatus] = useState<Notifications.PermissionStatus | null>(
-    null
-  );
+  const [permissionStatus, setPermissionStatus] = useState<PermissionStatus | null>(null);
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabledState] = useState(true);
   const deviceIdRef = useRef<string | null>(null);
   const registeringRef = useRef(false);
-  /** Prevents overlapping OS permission dialogs from open + sign-in + resume. */
   const permissionPromptRef = useRef(false);
-  /** Bumped on register so a stale sign-out disable cannot clobber a newer enable. */
   const pushGenerationRef = useRef(0);
 
   const disableRegisteredDevice = useCallback(async () => {
@@ -200,17 +264,15 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     };
   }, [disableRegisteredDevice]);
 
-  // Push disable runs only via signOutUser → disableDeviceTokenOnSignOut.
-  // Do not auto-disable when profile is briefly null during auth transitions;
-  // that raced sole-session login and left group tokens stuck at enabled:false.
-
   const refreshPermissionStatus = useCallback(async () => {
+    if (!Notifications) return null;
     const current = await Notifications.getPermissionsAsync();
     setPermissionStatus(current.status);
     return current;
   }, []);
 
   const registerPushToken = useCallback(async () => {
+    if (!Notifications || !notificationsAvailable()) return;
     if (!profile?.uid || registeringRef.current) return;
     if (!Device.isDevice) return;
 
@@ -251,21 +313,14 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     }
   }, [notificationsEnabled, profile?.uid]);
 
-  /**
-   * Ask the OS for notification permission on first open / while still askable.
-   * Important: do NOT require status === 'undetermined' — Android 13+ often returns
-   * 'denied' + canAskAgain before the first prompt, and the dialog only appears after
-   * a notification channel has been created.
-   */
   const promptForPermissionsIfNeeded = useCallback(async () => {
-    if (Platform.OS === 'web') {
+    if (Platform.OS === 'web' || !Notifications) {
       return false;
     }
 
-    // Channel must exist before Android 13 will show the permission dialog.
     await ensureAndroidChannel();
 
-    let permissions = await Notifications.getPermissionsAsync();
+    let permissions: NotificationPermissionsStatus = await Notifications.getPermissionsAsync();
     setPermissionStatus(permissions.status);
 
     if (permissions.granted || permissions.status === 'granted') {
@@ -286,26 +341,21 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     permissionPromptRef.current = true;
     try {
       permissions = await Notifications.requestPermissionsAsync({
-        ios: {
-          allowAlert: true,
-          allowBadge: true,
-          allowSound: true,
-        },
+        ios: { ...IOS_NOTIFICATION_PERMISSIONS },
       });
       setPermissionStatus(permissions.status);
       await AsyncStorage.setItem(NOTIFICATION_PERMISSION_ASKED_KEY, '1');
     } catch {
-      // Still mark asked so we don't loop on a broken native module.
       await AsyncStorage.setItem(NOTIFICATION_PERMISSION_ASKED_KEY, '1');
     } finally {
       permissionPromptRef.current = false;
     }
 
-    return permissions.status === 'granted' || permissions.granted === true;
+    return notificationSoundAllowed(permissions);
   }, []);
 
   const requestPermissions = useCallback(async () => {
-    // Settings / explicit enable: always attempt the OS dialog when not granted.
+    if (!Notifications) return false;
     await ensureAndroidChannel();
 
     let permissions = await Notifications.getPermissionsAsync();
@@ -316,11 +366,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       permissionPromptRef.current = true;
       try {
         permissions = await Notifications.requestPermissionsAsync({
-          ios: {
-            allowAlert: true,
-            allowBadge: true,
-            allowSound: true,
-          },
+          ios: { ...IOS_NOTIFICATION_PERMISSIONS },
         });
       } finally {
         permissionPromptRef.current = false;
@@ -330,7 +376,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     setPermissionStatus(permissions.status);
     await AsyncStorage.setItem(NOTIFICATION_PERMISSION_ASKED_KEY, '1');
 
-    if (permissions.granted || permissions.status === 'granted') {
+    if (notificationSoundAllowed(permissions)) {
       await registerPushToken();
       return true;
     }
@@ -357,13 +403,12 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     await registerPushToken();
   }, [refreshPermissionStatus, registerPushToken]);
 
-  // App open (first install / cold start): ask after UI is interactive.
   useEffect(() => {
+    if (!Notifications) return;
     let cancelled = false;
     let delayTimer: ReturnType<typeof setTimeout> | undefined;
 
     const task = InteractionManager.runAfterInteractions(() => {
-      // Wait past splash / first paint so the Activity can present the system dialog.
       delayTimer = setTimeout(() => {
         void (async () => {
           if (cancelled) return;
@@ -381,17 +426,16 @@ export function NotificationProvider({ children }: PropsWithChildren) {
     };
   }, [promptForPermissionsIfNeeded]);
 
-  // After sign-in: ensure permission then register Expo token + group index.
   useEffect(() => {
-    if (authLoading || !profile?.uid) return;
+    if (!Notifications || authLoading || !profile?.uid) return;
     void (async () => {
       await promptForPermissionsIfNeeded();
       await registerPushToken();
     })();
   }, [authLoading, profile?.uid, promptForPermissionsIfNeeded, registerPushToken]);
 
-  // Foreground resume: ask only if still askable / never asked on this install.
   useEffect(() => {
+    if (!Notifications) return;
     const subscription = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
       void (async () => {
@@ -405,14 +449,20 @@ export function NotificationProvider({ children }: PropsWithChildren) {
   }, [profile?.uid, promptForPermissionsIfNeeded, registerPushToken]);
 
   useEffect(() => {
-    const receivedSub = Notifications.addNotificationReceivedListener(() => {
-      // Foreground display is handled by setNotificationHandler; keep listener for future analytics.
+    if (!Notifications) return;
+
+    const receivedSub: EventSubscription = Notifications.addNotificationReceivedListener(() => {
+      // Foreground display is handled by setNotificationHandler.
     });
 
-    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
-      const data = response.notification.request.content.data as Record<string, unknown> | undefined;
-      void navigateFromNotificationData(data, isAdminRole(profile?.role));
-    });
+    const responseSub: EventSubscription = Notifications.addNotificationResponseReceivedListener(
+      (response) => {
+        const data = response.notification.request.content.data as
+          | Record<string, unknown>
+          | undefined;
+        void navigateFromNotificationData(data, isAdminRole(profile?.role));
+      }
+    );
 
     void Notifications.getLastNotificationResponseAsync().then((response) => {
       if (!response || !profile) return;
@@ -434,6 +484,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       requestPermissions,
       setNotificationsEnabled,
       previewReminderSound,
+      openSystemNotificationSettings,
       refreshPushRegistration,
     }),
     [
