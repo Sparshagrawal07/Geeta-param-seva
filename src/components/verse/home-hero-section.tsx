@@ -3,6 +3,7 @@ import { View } from 'react-native';
 
 import { SpiritualAssetImage } from '@/components/spiritual/spiritual-asset-image';
 import { HomeHeroHeader } from '@/components/verse/home-hero-header';
+import { spiritualDesignTokens } from '@/lib/spiritual-assets';
 
 interface HomeHeroSectionProps {
   name: string;
@@ -12,6 +13,8 @@ interface HomeHeroSectionProps {
 
 /** Hero + peacock feather overlapping the practice card (per reference mockup). */
 export function HomeHeroSection({ name, showNotificationBell, rightAction }: HomeHeroSectionProps) {
+  const bridge = spiritualDesignTokens.featherBridge;
+
   return (
     <View className="relative">
       <HomeHeroHeader
@@ -24,8 +27,8 @@ export function HomeHeroSection({ name, showNotificationBell, rightAction }: Hom
       <View
         pointerEvents="none"
         className="absolute right-0 z-0"
-        style={{ bottom: -72, width: 110, height: 170 }}>
-        <SpiritualAssetImage slot="verseFeather" style={{ right: -4, top: 0 }} />
+        style={{ bottom: bridge.bottom, width: bridge.width, height: bridge.height }}>
+        <SpiritualAssetImage slot="verseFeather" style={{ right: bridge.rightBleed, top: 0 }} />
       </View>
     </View>
   );

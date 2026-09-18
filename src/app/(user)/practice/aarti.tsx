@@ -37,11 +37,11 @@ export default function AartiPracticeScreen() {
   const body = locale === 'hi' ? AARTI_CONTENT.bodyHi : AARTI_CONTENT.bodyEn;
 
   return (
-    <Screen showBack title={title} contentClassName="px-5 pb-10">
+    <Screen showBack title={title} contentClassName="px-5 pb-10" animateContent={false}>
       <FadeInView slide>
         <SpiritualSurface variant="verse">
           <SpiritualSurfaceBody className="overflow-hidden">
-            <MandalaAccent kind="festive" style={{ top: -12, right: -16 }} />
+            <MandalaAccent kind="festive" />
             <AppText
               bold
               className="text-center text-xl text-gp-text dark:text-gp-text-dark"

@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { FeedPostContainer } from '@/components/feed/feed-post-container';
 import { AppText } from '@/components/ui/app-text';
 import { TranslatedAppText } from '@/components/ui/translated-app-text';
-import { formatDateTime } from '@/lib/format';
+import { formatFeedDateTime } from '@/lib/format';
 import { useLocale } from '@/providers/locale-provider';
 import type { AnnouncementPost } from '@/types/feed';
 
@@ -12,6 +12,8 @@ interface AnnouncementPostCardProps {
   deletable?: boolean;
   deleteActive?: boolean;
   onShowDelete?: (position: { x: number; y: number }) => void;
+  reportable?: boolean;
+  onReport?: () => void;
 }
 
 export function AnnouncementPostCard({
@@ -19,14 +21,22 @@ export function AnnouncementPostCard({
   deletable = false,
   deleteActive = false,
   onShowDelete,
+  reportable = false,
+  onReport,
 }: AnnouncementPostCardProps) {
-  const { locale } = useLocale();
+  const { t, locale } = useLocale();
+  const author = post.createdByName.trim() || t('defaultAdminName');
 
   return (
-    <FeedPostContainer deletable={deletable} deleteActive={deleteActive} onShowDelete={onShowDelete}>
-      <View className="rounded-xl border border-gp-border bg-gp-card p-4 dark:border-gp-border-dark dark:bg-gp-card-dark">
-        <AppText className="text-xs text-gp-muted dark:text-gp-muted-dark">
-          {formatDateTime(post.createdAt, locale)} • {post.createdByName}
+    <FeedPostContainer
+      deletable={deletable}
+      deleteActive={deleteActive}
+      onShowDelete={onShowDelete}
+      reportable={reportable}
+      onReport={onReport}>
+      <View className="rounded-2xl border border-gp-border bg-gp-card p-4 dark:border-gp-border-dark dark:bg-gp-card-dark">
+        <AppText className="pr-10 text-xs leading-5 text-gp-muted dark:text-gp-muted-dark">
+          {t('postedBy').replace('{name}', author)} · {formatFeedDateTime(post.createdAt, locale)}
         </AppText>
         <TranslatedAppText bold className="mt-2 text-lg text-saffron dark:text-saffron-light">
           {post.title}

@@ -46,7 +46,7 @@ export default function GroupsScreen() {
   );
 
   if (!isSeniorAdmin(profile?.role)) {
-    return <Redirect href="/(admin)" />;
+    return <Redirect href="/(admin)/(tabs)" />;
   }
 
   const handleCreate = async () => {

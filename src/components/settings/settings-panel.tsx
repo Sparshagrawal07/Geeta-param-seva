@@ -1,13 +1,13 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
 import { useState, type ReactNode } from 'react';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 
 import { LanguageToggle } from '@/components/language-toggle';
+import { AppPressable } from '@/components/ui/app-pressable';
 import { AppText } from '@/components/ui/app-text';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { useAuth } from '@/hooks/use-auth';
-import { triggerHaptic } from '@/lib/haptics';
 import { type ThemeMode } from '@/lib/theme';
 import { isAdminRole } from '@/lib/users';
 import { useAlert } from '@/providers/alert-provider';
@@ -78,14 +78,13 @@ function SettingsRow({
   }
 
   return (
-    <Pressable
+    <AppPressable
       className={rowClass}
-      onPress={() => {
-        void triggerHaptic('light');
-        onPress();
-      }}>
+      onPress={onPress}
+      haptic="light"
+      minTouchSize={0}>
       {content}
-    </Pressable>
+    </AppPressable>
   );
 }
 
@@ -99,11 +98,10 @@ function ThemeChip({
   onPress: () => void;
 }) {
   return (
-    <Pressable
-      onPress={() => {
-        void triggerHaptic('selection');
-        onPress();
-      }}
+    <AppPressable
+      onPress={onPress}
+      haptic="selection"
+      minTouchSize={0}
       className={`flex-1 items-center rounded-xl border px-2 py-2.5 ${
         active
           ? 'border-saffron bg-saffron/10'
@@ -114,7 +112,7 @@ function ThemeChip({
         className={`text-sm ${active ? 'text-saffron' : 'text-gp-text dark:text-gp-text-dark'}`}>
         {label}
       </AppText>
-    </Pressable>
+    </AppPressable>
   );
 }
 

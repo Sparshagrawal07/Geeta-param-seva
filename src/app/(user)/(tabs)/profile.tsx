@@ -18,10 +18,10 @@ export default function UserProfileScreen() {
     <Screen contentClassName="px-5 pb-10 pt-2" animateContent={false}>
       <SectionHeader title={t('profileTitle')} subtitle={t('settingsAccountHint')} />
 
-      <SpiritualSurface withMandala>
+      <SpiritualSurface>
         <SpiritualSurfaceBody>
           <View className="relative items-center overflow-hidden rounded-2xl py-2">
-            <MandalaWashBackdrop opacity={0.1} />
+            <MandalaWashBackdrop />
             <View className="relative z-[1]">
               <AppBrand />
             </View>

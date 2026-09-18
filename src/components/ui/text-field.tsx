@@ -1,5 +1,5 @@
 import { forwardRef, type ReactNode } from 'react';
-import { Text, TextInput, View, type TextInputProps } from 'react-native';
+import { TextInput, View, type TextInputProps } from 'react-native';
 
 import { AppText } from '@/components/ui/app-text';
 import { useAppColors } from '@/hooks/use-app-colors';
@@ -59,14 +59,11 @@ export const AppTextField = forwardRef<TextInput, AppTextFieldProps>(function Ap
         input
       )}
       {helperMessage ? (
-        <Text
-          style={{
-            fontSize: 14,
-            lineHeight: 24,
-            color: errorText ? destructiveText : placeholder,
-          }}>
+        <AppText
+          className="text-sm leading-6"
+          style={{ color: errorText ? destructiveText : placeholder }}>
           {helperMessage}
-        </Text>
+        </AppText>
       ) : null}
     </View>
   );

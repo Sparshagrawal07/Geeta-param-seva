@@ -118,6 +118,8 @@ describe('store compliance: legal and account deletion', () => {
   it('keeps legal screens and account settings wired in the app tree', () => {
     expect(existsSync(path.join(SRC, 'app/legal/privacy.tsx'))).toBe(true);
     expect(existsSync(path.join(SRC, 'app/legal/terms.tsx'))).toBe(true);
+    expect(existsSync(path.join(SRC, 'app/(auth)/terms-agreement.tsx'))).toBe(true);
+    expect(existsSync(path.join(SRC, 'components/legal/legal-consent-checkbox.tsx'))).toBe(true);
     expect(existsSync(path.join(SRC, 'app/settings.tsx'))).toBe(true);
     expect(existsSync(path.join(SRC, 'components/settings/settings-panel.tsx'))).toBe(true);
     expect(existsSync(path.join(SRC, 'components/legal/legal-links.tsx'))).toBe(true);
@@ -137,6 +139,60 @@ describe('store compliance: legal and account deletion', () => {
     const termsScreen = readFileSync(path.join(SRC, 'app/legal/terms.tsx'), 'utf8');
     expect(privacyScreen).toContain('resolveLegalAudience');
     expect(termsScreen).toContain('resolveLegalAudience');
+
+    const termsAgreement = readFileSync(path.join(SRC, 'app/(auth)/terms-agreement.tsx'), 'utf8');
+    expect(termsAgreement).toContain('acceptTerms');
+    expect(termsAgreement).toContain('LegalConsentCheckbox');
+    expect(termsAgreement).toContain('getTermsOfServiceSections');
+
+    const applySheet = readFileSync(path.join(SRC, 'components/auth/apply-to-join-sheet.tsx'), 'utf8');
+    expect(applySheet).toContain('LegalConsentCheckbox');
+    expect(applySheet).toContain('agreedToTerms');
+  });
+});
+
+describe('store compliance: guideline 1.2 safety', () => {
+  it('ships report content UI and admin moderation without member block-user', () => {
+    expect(existsSync(path.join(SRC, 'services/content-reports.ts'))).toBe(true);
+    expect(existsSync(path.join(SRC, 'components/feed/report-content-modal.tsx'))).toBe(true);
+    expect(existsSync(path.join(SRC, 'app/(admin)/reports.tsx'))).toBe(true);
+
+    const feedContainer = readFileSync(path.join(SRC, 'components/feed/feed-post-container.tsx'), 'utf8');
+    expect(feedContainer).toContain('reportContent');
+    expect(feedContainer).toContain('ellipsis-horizontal');
+
+    const groupFeed = readFileSync(path.join(SRC, 'components/feed/group-feed.tsx'), 'utf8');
+    expect(groupFeed).toContain('ReportContentModal');
+    expect(groupFeed).not.toMatch(/blockUser|Block User|block_user/i);
+
+    const reportsScreen = readFileSync(path.join(SRC, 'app/(admin)/reports.tsx'), 'utf8');
+    expect(reportsScreen).toContain('deleteFeedItem');
+    expect(reportsScreen).toContain('contentReportDeactivateHint');
+    expect(reportsScreen).not.toMatch(/blockUser|Block User/i);
+
+    const moreScreen = readFileSync(path.join(SRC, 'app/(admin)/(tabs)/more.tsx'), 'utf8');
+    expect(moreScreen).toContain('/(admin)/reports');
+
+    expect(messages.reportContent.length).toBeGreaterThan(0);
+    expect(messages.deactivatePerson.toLowerCase()).toContain('deactivate');
+    expect(messages).not.toHaveProperty('blockUser');
+  });
+
+  it('requires zero-tolerance and reporting language in terms', () => {
+    const memberTerms = flattenBodies(getTermsOfServiceSections('member'));
+    const adminTerms = flattenBodies(getTermsOfServiceSections('admin'));
+    expect(memberTerms).toMatch(/zero tolerance|objectionable/);
+    expect(memberTerms).toMatch(/report/);
+    expect(memberTerms).toMatch(/deactivat/);
+    expect(adminTerms).toMatch(/zero tolerance|objectionable/);
+    expect(adminTerms).toMatch(/report/);
+  });
+
+  it('firestore rules allow content_reports create and admin review', () => {
+    const rules = readFileSync(path.join(ROOT, 'firestore.rules'), 'utf8');
+    expect(rules).toContain('match /content_reports/{reportId}');
+    expect(rules).toContain("request.resource.data.reporterUid == request.auth.uid");
+    expect(rules).toContain('canManageGroup(resource.data.groupId)');
   });
 });
 

@@ -3,12 +3,12 @@ import { Pressable, View } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 
 import { Screen } from '@/components/layout/screen';
-import { MandalaWashBackdrop } from '@/components/spiritual/mandala-accent';
+import { MandalaGoldBackdrop } from '@/components/spiritual/mandala-accent';
 import { SpiritualSurface, SpiritualSurfaceBody } from '@/components/spiritual/spiritual-surface';
 import { LotusDivider } from '@/components/verse/lotus-divider';
 import { AppText } from '@/components/ui/app-text';
+import { AppSpinner } from '@/components/ui/app-spinner';
 import { ErrorState } from '@/components/ui/error-state';
-import { LoadingScreen } from '@/components/ui/loading-screen';
 import { FadeInView } from '@/components/ui/fade-in-view';
 import { useLocale } from '@/providers/locale-provider';
 import {
@@ -59,11 +59,19 @@ export default function GitaChapterScreen() {
     void load();
   }, [load]);
 
-  if (loading) return <LoadingScreen />;
+  if (loading) {
+    return (
+      <Screen showBack title={t('gitaExploreTitle')} animateContent={false}>
+        <View className="items-center py-16">
+          <AppSpinner />
+        </View>
+      </Screen>
+    );
+  }
 
   if (error || !chapter) {
     return (
-      <Screen showBack title={t('gitaExploreTitle')}>
+      <Screen showBack title={t('gitaExploreTitle')} animateContent={false}>
         <ErrorState message={error || t('errorUnexpected')} onRetry={() => void load()} />
       </Screen>
     );
@@ -77,8 +85,9 @@ export default function GitaChapterScreen() {
       showBack
       title={`${t('gitaChapterWord')} ${chapter.chapterNumber}`}
       subtitle={title}
-      contentClassName="relative px-5 pb-10">
-      <MandalaWashBackdrop opacity={0.06} />
+      contentClassName="relative px-5 pb-10"
+      animateContent={false}>
+      <MandalaGoldBackdrop />
 
       {summary ? (
         <FadeInView slide>
@@ -96,7 +105,7 @@ export default function GitaChapterScreen() {
                 onPress={() =>
                   router.push(`/(user)/gita/verse/${chapter.chapterNumber}/${verse.verseNumber}` as never)
                 }>
-                <SpiritualSurface variant="elevated" withMandala>
+                <SpiritualSurface variant="elevated" withMandala mandalaKind="gold">
                   <SpiritualSurfaceBody className="py-4">
                     <AppText bold className="text-xs uppercase tracking-widest text-saffron dark:text-gold">
                       {content.reference}

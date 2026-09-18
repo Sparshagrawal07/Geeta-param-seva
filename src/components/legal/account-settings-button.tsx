@@ -1,7 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import { Pressable } from 'react-native';
 
+import { GlassIconButton } from '@/components/ui/glass-pressable';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { triggerHaptic } from '@/lib/haptics';
 
@@ -11,20 +11,20 @@ export function AccountSettingsButton({ light = false }: { light?: boolean }) {
   const router = useRouter();
 
   return (
-    <Pressable
-      hitSlop={12}
+    <GlassIconButton
+      light={light}
       accessibilityRole="button"
       accessibilityLabel="Settings"
+      haptic="light"
       onPress={() => {
         void triggerHaptic('light');
         router.push('/settings');
-      }}
-      className={
-        light
-          ? 'h-10 w-10 items-center justify-center rounded-full bg-black/30 dark:bg-black/40'
-          : undefined
-      }>
-      <Ionicons name="settings-outline" size={light ? 22 : 24} color={light ? '#F5EDE8' : colors.saffron} />
-    </Pressable>
+      }}>
+      <Ionicons
+        name="settings-outline"
+        size={light ? 22 : 24}
+        color={light ? '#F5EDE8' : colors.saffron}
+      />
+    </GlassIconButton>
   );
 }

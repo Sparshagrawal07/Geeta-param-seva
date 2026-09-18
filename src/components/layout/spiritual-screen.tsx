@@ -1,14 +1,14 @@
-import type { ReactNode } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, View, type ScrollViewProps } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRouter } from 'expo-router';
-import { Pressable } from 'react-native';
+import type { ReactNode, RefObject } from 'react';
+import { KeyboardAvoidingView, Platform, ScrollView, View, type ScrollViewProps } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LanguageToggle } from '@/components/language-toggle';
 import { AccountSettingsButton } from '@/components/legal/account-settings-button';
-import { FadeInView } from '@/components/ui/fade-in-view';
 import { AppText } from '@/components/ui/app-text';
+import { GlassIconButton } from '@/components/ui/glass-pressable';
+import { FadeInView } from '@/components/ui/fade-in-view';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { useReduceMotion } from '@/lib/motion';
 import { spiritualDesignTokens } from '@/lib/spiritual-assets';
@@ -38,7 +38,7 @@ interface SpiritualScreenProps {
 export function SpiritualScreen({
   children,
   scrollable = true,
-  contentClassName = 'px-5 pb-8 pt-2',
+  contentClassName = 'px-5 pb-10 pt-2',
   scrollProps,
   showLanguageToggle = false,
   showAccountSettings = false,
@@ -70,14 +70,13 @@ export function SpiritualScreen({
         <View className="flex-row items-center justify-between gap-3">
           <View className="min-w-0 flex-1 flex-row items-center gap-2">
             {showBack ? (
-              <Pressable
+              <GlassIconButton
                 accessibilityRole="button"
                 accessibilityLabel="Back"
-                onPress={handleBack}
-                hitSlop={10}
-                className="h-10 w-10 items-center justify-center rounded-full border border-saffron/25 bg-gp-card dark:border-gold/25 dark:bg-gp-card-dark">
+                haptic="selection"
+                onPress={handleBack}>
                 <Ionicons name="chevron-back" size={22} color={colors.gpText} />
-              </Pressable>
+              </GlassIconButton>
             ) : null}
             {title ? (
               <View className="min-w-0 flex-1">
@@ -131,13 +130,24 @@ export function SpiritualScreen({
 }
 
 /** Auth form shell with keyboard avoidance. Top inset comes from AuthHeroHeader; bottom clears system nav. */
-export function SpiritualAuthShell({ children }: { children: ReactNode }) {
+export function SpiritualAuthShell({
+  children,
+  scrollRef,
+}: {
+  children: ReactNode;
+  scrollRef?: RefObject<ScrollView | null>;
+}) {
   return (
     <KeyboardAvoidingView
       className="flex-1 bg-gp-bg dark:bg-gp-bg-dark"
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      behavior="padding"
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}>
       <SafeAreaView className="flex-1" edges={['bottom']}>
-        <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+        <ScrollView
+          ref={scrollRef}
+          contentContainerStyle={{ flexGrow: 1 }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive">
           {children}
         </ScrollView>
       </SafeAreaView>

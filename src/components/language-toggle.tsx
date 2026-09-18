@@ -31,8 +31,9 @@ function ToggleOption({
   );
 }
 
+/** Android / default: solid segmented pills (unchanged). */
 export function LanguageToggle() {
-  const { locale, setLocale, isTranslating } = useLocale();
+  const { locale, setLocale } = useLocale();
 
   const select = (nextLocale: Locale) => {
     if (nextLocale !== locale) {
@@ -42,14 +43,11 @@ export function LanguageToggle() {
   };
 
   return (
-    <View className="items-end gap-1">
+    <View className="items-end">
       <View className="flex-row self-end rounded-xl border border-gp-border bg-gp-card p-1.5 dark:border-gp-border-dark dark:bg-gp-card-dark">
         <ToggleOption label="EN" active={locale === 'en'} onPress={() => select('en')} />
         <ToggleOption label="हिं" active={locale === 'hi'} onPress={() => select('hi')} bold />
       </View>
-      {isTranslating ? (
-        <AppText className="text-xs text-gp-muted dark:text-gp-muted-dark">…</AppText>
-      ) : null}
     </View>
   );
 }

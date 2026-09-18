@@ -1,3 +1,4 @@
+import { setGlobalOptions } from 'firebase-functions/v2';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
@@ -50,6 +51,17 @@ import {
 } from './join-applications';
 
 const region = 'asia-south1';
+
+/**
+ * asia-south1 Cloud Run CPU quota is tight. Gen2 defaults to 1 vCPU each, and
+ * a full deploy health-checks new revisions while old ones still run — that
+ * doubles CPU and hits "Quota exceeded for total allowable CPU per project per region".
+ * `gcf_gen1` keeps fractional CPU (1st-gen style) so batch deploys fit the quota.
+ */
+setGlobalOptions({
+  region,
+  cpu: 'gcf_gen1',
+});
 
 const callableOptions = {
   region,

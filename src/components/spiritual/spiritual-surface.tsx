@@ -7,6 +7,7 @@ import { useAppColors } from '@/hooks/use-app-colors';
 import { spiritualDesignTokens, spiritualGradients } from '@/lib/spiritual-ui';
 
 type SurfaceVariant = 'default' | 'elevated' | 'verse' | 'auth';
+type MandalaKind = 'primary' | 'gold' | 'seal';
 
 interface SpiritualSurfaceProps extends ViewProps {
   children: ReactNode;
@@ -15,6 +16,10 @@ interface SpiritualSurfaceProps extends ViewProps {
   className?: string;
   /** Soft mandala watermark for elevated cards (default off). Verse surfaces always include one. */
   withMandala?: boolean;
+  /** Which mandala to use when withMandala / verse. Gita uses gold. */
+  mandalaKind?: MandalaKind;
+  /** Opacity override for the surface mandala (e.g. when Krishna also present). */
+  mandalaOpacity?: number;
 }
 
 function useSurfaceColors(variant: SurfaceVariant, isDark: boolean) {
@@ -30,22 +35,12 @@ function useSurfaceColors(variant: SurfaceVariant, isDark: boolean) {
   }
 }
 
-function SurfaceMandala({ variant }: { variant: SurfaceVariant }) {
-  if (variant === 'verse') {
-    return (
-      <View pointerEvents="none" className="absolute inset-0 overflow-hidden">
-        <MandalaAccent kind="primary" />
-      </View>
-    );
-  }
-  if (variant === 'elevated') {
-    return (
-      <View pointerEvents="none" className="absolute inset-0 overflow-hidden">
-        <MandalaAccent kind="seal" />
-      </View>
-    );
-  }
-  return null;
+function SurfaceMandala({ kind, opacity }: { kind: MandalaKind; opacity?: number }) {
+  return (
+    <View pointerEvents="none" className="absolute inset-0 overflow-hidden">
+      <MandalaAccent kind={kind} opacity={opacity} />
+    </View>
+  );
 }
 
 export function SpiritualSurface({
@@ -54,13 +49,14 @@ export function SpiritualSurface({
   bordered = true,
   className,
   withMandala = false,
+  mandalaKind,
+  mandalaOpacity,
   ...rest
 }: SpiritualSurfaceProps) {
   const { isDark } = useAppColors();
-  const borderClass = bordered
-    ? 'border border-saffron/20 dark:border-gold/25'
-    : '';
+  const borderClass = bordered ? 'border border-saffron/20 dark:border-gold/25' : '';
   const showMandala = variant === 'verse' || withMandala;
+  const resolvedKind: MandalaKind = mandalaKind ?? (variant === 'verse' ? 'primary' : 'seal');
 
   if (variant === 'verse') {
     const colors = isDark ? spiritualGradients.verseCard.dark : spiritualGradients.verseCard.light;
@@ -69,7 +65,7 @@ export function SpiritualSurface({
         className={`relative overflow-hidden rounded-3xl shadow-lg shadow-black/10 dark:shadow-black/30 ${borderClass} ${className ?? ''}`}
         {...rest}>
         <LinearGradient colors={[...colors]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-          <SurfaceMandala variant="verse" />
+          {showMandala ? <SurfaceMandala kind={resolvedKind} opacity={mandalaOpacity} /> : null}
           {children}
         </LinearGradient>
       </View>
@@ -82,9 +78,7 @@ export function SpiritualSurface({
       className={`relative overflow-hidden rounded-2xl ${borderClass} ${className ?? ''}`}
       style={{ backgroundColor: bg }}
       {...rest}>
-      {showMandala ? (
-        <SurfaceMandala variant={variant === 'elevated' || variant === 'default' ? 'elevated' : 'verse'} />
-      ) : null}
+      {showMandala ? <SurfaceMandala kind={resolvedKind} opacity={mandalaOpacity} /> : null}
       {children}
     </View>
   );
@@ -94,5 +88,9 @@ export function SpiritualSurfaceBody({
   children,
   className,
 }: PropsWithChildren<{ className?: string }>) {
-  return <View className={`relative px-5 py-6 ${className ?? ''}`} style={{ zIndex: 1 }}>{children}</View>;
+  return (
+    <View className={`relative px-5 py-6 ${className ?? ''}`} style={{ zIndex: 1 }}>
+      {children}
+    </View>
+  );
 }

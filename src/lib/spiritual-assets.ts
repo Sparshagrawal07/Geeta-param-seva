@@ -1,4 +1,4 @@
-import type { ImageSourcePropType, ImageStyle, StyleProp, ViewStyle } from 'react-native';
+import type { ImageSourcePropType, ImageStyle, ViewStyle } from 'react-native';
 
 import { brandPalette } from '@/lib/brand-palette';
 
@@ -295,6 +295,80 @@ export const spiritualDesignTokens = {
     xl: 32,
   },
   contentMaxWidth: 520,
+  /** Soft screen/card wash — use once; avoid stacking opacity wrappers. */
+  washOpacity: {
+    screen: 0.07,
+    screenDark: 0.12,
+    empty: 0.1,
+    error: 0.06,
+  },
+  /** Home peacock feather bridge over practice card. */
+  featherBridge: {
+    bottom: -72,
+    width: 110,
+    height: 170,
+    rightBleed: -4,
+  },
+  /**
+   * Bottom-only temple blend. A blurred copy is revealed through a continuous
+   * alpha ramp, so the image becomes gently misted instead of forming a strip.
+   */
+  heroTempleBlend: {
+    home: {
+      blurRadius: 6,
+      maskStart: 0.5,
+      maskMid: 0.78,
+      midOpacity: 0.3,
+      bottomOpacity: 0.82,
+      reflectionRatio: 0.2,
+      reflectionMinHeight: 44,
+      reflectionMaxHeight: 56,
+    },
+    auth: {
+      blurRadius: 5,
+      maskStart: 0.54,
+      maskMid: 0.8,
+      midOpacity: 0.26,
+      bottomOpacity: 0.76,
+      reflectionRatio: 0.2,
+      reflectionMinHeight: 36,
+      reflectionMaxHeight: 48,
+    },
+    /** Reflection alpha ramp: previous +20%, then another +15%. */
+    reflectionOpacity: {
+      top: 0.2484,
+      middle: 0.1656,
+      lower: 0.0552,
+    },
+    /** Light canvas needs more image presence; dark mode remains restrained. */
+    reflectionMode: {
+      light: {
+        visibilityMultiplier: 1.4,
+        canvasFadeMiddleOpacity: 0.22,
+        canvasFadeMiddleLocation: 0.72,
+      },
+      dark: {
+        visibilityMultiplier: 1,
+        canvasFadeMiddleOpacity: 0.4,
+        canvasFadeMiddleLocation: 0.62,
+      },
+    },
+    /** Tiny image-to-reflection bleed; net layout extension remains unchanged. */
+    reflectionSeamOverlap: 2,
+    reflectionBands: [
+      { start: 0, end: 0.4, blurRadius: 3, xOffset: -0.5 },
+      { start: 0.36, end: 0.73, blurRadius: 6, xOffset: 1.25 },
+      { start: 0.69, end: 1, blurRadius: 10, xOffset: -1.75 },
+    ],
+  },
+  /** Krishna watermark clip (slightly larger than slot for soft crop). */
+  krishnaClip: {
+    widthPad: 14,
+    heightPad: 38,
+    rightBleed: -4,
+    gradientWidth: 130,
+    gradientLeft: -28,
+  },
 } as const;
 
 export type SpiritualDesignTokens = typeof spiritualDesignTokens;

@@ -1,7 +1,8 @@
 import { FieldValue, type DocumentData, type Query } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 
-import { db } from './firebase-admin';
+import { adminAuth, db } from './firebase-admin';
+import { revokeAllUserSessions } from './sessions';
 
 export type RosterRole = 'user' | 'admin';
 export type RosterStatus = 'active' | 'inactive';
@@ -334,6 +335,21 @@ export async function deactivateAccessRosterEntry(input: {
       .collection('groups')
       .doc(String(data.groupId))
       .set({ memberCount: FieldValue.increment(-1), statsUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+  }
+
+  // End any live sessions immediately so deactivated accounts lose access now.
+  try {
+    const authUser = await adminAuth.getUserByPhoneNumber(phoneNumber);
+    await revokeAllUserSessions(authUser.uid);
+  } catch {
+    const usersSnap = await db
+      .collection('users')
+      .where('phoneNumber', '==', phoneNumber)
+      .limit(1)
+      .get();
+    if (!usersSnap.empty) {
+      await revokeAllUserSessions(usersSnap.docs[0]!.id);
+    }
   }
 
   return { id: phoneId, status: 'inactive' as const };

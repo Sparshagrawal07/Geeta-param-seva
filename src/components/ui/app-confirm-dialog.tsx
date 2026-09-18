@@ -1,5 +1,6 @@
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { GlassSurface } from '@/components/ui/glass-surface';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { triggerHaptic } from '@/lib/haptics';
 
@@ -33,8 +34,14 @@ export function AppConfirmDialog({
       <View style={styles.root}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
 
-        <View
+        <GlassSurface
           style={{
+            width: '100%',
+            maxWidth: 340,
+            borderRadius: 16,
+            zIndex: 1,
+          }}
+          fallbackStyle={{
             width: '100%',
             maxWidth: 340,
             borderRadius: 16,
@@ -70,7 +77,7 @@ export function AppConfirmDialog({
           <View
             style={{
               flexDirection: 'row',
-              borderTopWidth: 1,
+              borderTopWidth: StyleSheet.hairlineWidth,
               borderTopColor: colors.gpBorder,
             }}>
             {cancelLabel ? (
@@ -85,7 +92,7 @@ export function AppConfirmDialog({
                   minHeight: 44,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  borderRightWidth: 1,
+                  borderRightWidth: StyleSheet.hairlineWidth,
                   borderRightColor: colors.gpBorder,
                   opacity: loading ? 0.6 : 1,
                 }}>
@@ -115,7 +122,7 @@ export function AppConfirmDialog({
               </Text>
             </Pressable>
           </View>
-        </View>
+        </GlassSurface>
       </View>
     </Modal>
   );

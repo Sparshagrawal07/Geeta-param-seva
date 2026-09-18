@@ -1,11 +1,11 @@
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 import { router } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { SpiritualSurface, SpiritualSurfaceBody } from '@/components/spiritual/spiritual-surface';
+import { AppPressable } from '@/components/ui/app-pressable';
 import { AppText } from '@/components/ui/app-text';
 import { useAppColors } from '@/hooks/use-app-colors';
-import { triggerHaptic } from '@/lib/haptics';
 import { useLocale } from '@/providers/locale-provider';
 
 /** Compact home entry that opens the full Gita explore screen. */
@@ -14,14 +14,15 @@ export function GitaExploreEntry() {
   const colors = useAppColors();
 
   return (
-    <Pressable
+    <AppPressable
       accessibilityRole="button"
       onPress={() => {
-        void triggerHaptic('selection');
         router.push('/(user)/gita' as never);
       }}
+      haptic="selection"
+      minTouchSize={0}
       className="mt-8">
-      <SpiritualSurface variant="elevated" withMandala>
+      <SpiritualSurface variant="elevated" withMandala mandalaKind="gold">
         <SpiritualSurfaceBody className="py-4">
           <View className="flex-row items-center gap-3">
             <View className="h-12 w-12 items-center justify-center rounded-2xl bg-saffron/12 dark:bg-gold/15">
@@ -31,7 +32,9 @@ export function GitaExploreEntry() {
               <AppText bold className="text-base text-gp-text dark:text-gp-text-dark">
                 {t('gitaExploreTitle')}
               </AppText>
-              <AppText className="mt-1 text-sm leading-5 text-gp-muted dark:text-gp-muted-dark" numberOfLines={2}>
+              <AppText
+                className="mt-1 text-sm leading-5 text-gp-muted dark:text-gp-muted-dark"
+                numberOfLines={2}>
                 {t('gitaExploreSubtitle')}
               </AppText>
             </View>
@@ -44,6 +47,6 @@ export function GitaExploreEntry() {
           </View>
         </SpiritualSurfaceBody>
       </SpiritualSurface>
-    </Pressable>
+    </AppPressable>
   );
 }

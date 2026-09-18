@@ -2,14 +2,14 @@ import { profileNeedsName } from '@/lib/profile';
 import { isAdminRole, type UserProfile, type UserRole } from '@/lib/users';
 
 export type AppRoute =
-  | '/(admin)'
-  | '/(user)'
+  | '/(admin)/(tabs)'
+  | '/(user)/(tabs)'
   | '/sign-in'
   | '/complete-profile'
   | '/set-personal-pin';
 
 export function getDashboardRoute(role: UserRole | null | undefined): AppRoute {
-  return isAdminRole(role) ? '/(admin)' : '/(user)';
+  return isAdminRole(role) ? '/(admin)/(tabs)' : '/(user)/(tabs)';
 }
 
 export function needsPersonalPinSetup(profile: UserProfile | null | undefined): boolean {

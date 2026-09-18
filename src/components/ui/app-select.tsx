@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 
 import { AppText } from '@/components/ui/app-text';
+import { GlassSurface } from '@/components/ui/glass-surface';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { triggerHaptic } from '@/lib/haptics';
 import { useLocale } from '@/providers/locale-provider';
@@ -94,8 +95,14 @@ export function AppSelect({
         <View style={styles.overlay}>
           <Pressable style={StyleSheet.absoluteFill} onPress={close} />
 
-          <View
+          <GlassSurface
             style={{
+              width: '100%',
+              maxWidth: 400,
+              maxHeight: '70%',
+              borderRadius: 16,
+            }}
+            fallbackStyle={{
               width: '100%',
               maxWidth: 400,
               maxHeight: '70%',
@@ -158,7 +165,7 @@ export function AppSelect({
                 );
               })}
             </ScrollView>
-          </View>
+          </GlassSurface>
         </View>
       </Modal>
     </View>

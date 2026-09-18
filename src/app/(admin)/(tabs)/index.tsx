@@ -69,17 +69,17 @@ export default function AdminDashboardScreen() {
   );
 
   const seniorActions: QuickAction[] = [
-    { key: 'member', labelKey: 'quickActionAddMember', icon: 'person-add-outline', href: '/(admin)/members' },
-    { key: 'admin', labelKey: 'quickActionAddAdmin', icon: 'shield-outline', href: '/(admin)/members' },
+    { key: 'member', labelKey: 'quickActionAddMember', icon: 'person-add-outline', href: '/(admin)/(tabs)/members' },
+    { key: 'admin', labelKey: 'quickActionAddAdmin', icon: 'shield-outline', href: '/(admin)/(tabs)/members' },
     { key: 'group', labelKey: 'quickActionCreateGroup', icon: 'layers-outline', href: '/(admin)/groups' },
-    { key: 'practice', labelKey: 'quickActionPractice', icon: 'book-outline', href: '/(admin)/practice' },
-    { key: 'create', labelKey: 'quickActionCreatePost', icon: 'create-outline', href: '/(admin)/create' },
+    { key: 'practice', labelKey: 'quickActionPractice', icon: 'book-outline', href: '/(admin)/(tabs)/practice' },
+    { key: 'create', labelKey: 'quickActionCreatePost', icon: 'create-outline', href: '/(admin)/(tabs)/create' },
   ];
 
   const adminActions: QuickAction[] = [
-    { key: 'member', labelKey: 'quickActionAddMember', icon: 'person-add-outline', href: '/(admin)/members' },
-    { key: 'practice', labelKey: 'quickActionPractice', icon: 'book-outline', href: '/(admin)/practice' },
-    { key: 'create', labelKey: 'quickActionCreatePost', icon: 'create-outline', href: '/(admin)/create' },
+    { key: 'member', labelKey: 'quickActionAddMember', icon: 'person-add-outline', href: '/(admin)/(tabs)/members' },
+    { key: 'practice', labelKey: 'quickActionPractice', icon: 'book-outline', href: '/(admin)/(tabs)/practice' },
+    { key: 'create', labelKey: 'quickActionCreatePost', icon: 'create-outline', href: '/(admin)/(tabs)/create' },
     { key: 'feed', labelKey: 'tabFeed', icon: 'newspaper-outline', href: '/(admin)/feed' },
   ];
 

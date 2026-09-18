@@ -11,7 +11,7 @@ interface InfoCardProps {
 export function InfoCard({ label, value, style }: InfoCardProps) {
   return (
     <View
-      className="rounded-2xl border border-saffron/15 bg-saffron/[0.06] p-3.5 dark:border-gold/20 dark:bg-gold/10"
+      className="rounded-2xl border border-saffron/20 bg-saffron/[0.06] p-3.5 dark:border-gold/25 dark:bg-gold/10"
       style={[{ flex: 1, minWidth: 0, minHeight: 84, justifyContent: 'center' }, style]}>
       <AppText
         className="text-xs leading-4 text-gp-muted dark:text-gp-muted-dark"

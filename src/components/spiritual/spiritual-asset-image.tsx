@@ -15,6 +15,8 @@ interface SpiritualAssetImageProps {
   className?: string;
   /** Optional opacity override (0–1). Uses slot defaults when omitted. */
   opacity?: number;
+  /** Native image blur radius, used by masked decorative blends. */
+  blurRadius?: number;
 }
 
 function resolveCoverAnchorStyle(
@@ -36,7 +38,13 @@ function resolveCoverAnchorStyle(
 }
 
 /** Renders a replaceable artwork slot with fixed geometry — swap PNGs without changing layouts. */
-export function SpiritualAssetImage({ slot, style, className, opacity: opacityOverride }: SpiritualAssetImageProps) {
+export function SpiritualAssetImage({
+  slot,
+  style,
+  className,
+  opacity: opacityOverride,
+  blurRadius,
+}: SpiritualAssetImageProps) {
   const { isDark } = useAppColors();
   const config = spiritualAssetSlots[slot];
   const source = isDark ? config.dark : config.light;
@@ -90,7 +98,12 @@ export function SpiritualAssetImage({ slot, style, className, opacity: opacityOv
           : undefined,
         style,
       ]}>
-      <Image source={source} resizeMode={config.resizeMode} style={imageStyle} />
+      <Image
+        source={source}
+        resizeMode={config.resizeMode}
+        blurRadius={blurRadius}
+        style={imageStyle}
+      />
     </View>
   );
 }

@@ -147,7 +147,7 @@ export function getTermsOfServiceSections(audience: LegalAudience): LegalSection
       {
         title: 'Content and notifications',
         body:
-          'Publish only lawful, respectful, and accurate content. Do not send spam, harassment, or misleading alerts. The organization may remove content or revoke admin access for misuse.',
+          'Publish only lawful, respectful, and accurate content. We have zero tolerance for objectionable, unlawful, abusive, harassing, or misleading content. Do not send spam, harassment, or misleading alerts. Members may report content; administrators must review reports promptly and remove inappropriate material. The organization may remove content, deactivate accounts, or revoke admin access for misuse.',
       },
       {
         title: 'Availability',
@@ -180,12 +180,12 @@ export function getTermsOfServiceSections(audience: LegalAudience): LegalSection
     {
       title: 'Acceptable use',
       body:
-        'Use the app respectfully for community seva coordination. Do not attempt unauthorized access, share another person’s account, or post unlawful, abusive, or misleading content.',
+        'Use the app respectfully for community seva coordination. Do not attempt unauthorized access, share another person’s account, or misuse the service. We have zero tolerance for objectionable, unlawful, abusive, harassing, or misleading content.',
     },
     {
-      title: 'Content',
+      title: 'Content and moderation',
       body:
-        'Group feeds may include seva updates, messages, and alerts published by admins. Content is for approved community members; do not redistribute sensitive group information outside the community without permission.',
+        'Community feed content (seva updates, messages, and alerts) is created and published only by authorized administrators — members cannot create posts, upload content, or comment. You may report objectionable content in the app. Administrators review reports and may remove content. Senior administrators may deactivate accounts that violate these Terms or engage in abusive behavior. Content is for approved community members; do not redistribute sensitive group information outside the community without permission.',
     },
     {
       title: 'Advertising',

@@ -25,15 +25,15 @@ function profile(overrides: Partial<TestProfile>): TestProfile {
 
 describe('getDashboardRoute', () => {
   it('routes senior admin to admin dashboard', () => {
-    expect(getDashboardRoute('senior_admin')).toBe('/(admin)');
+    expect(getDashboardRoute('senior_admin')).toBe('/(admin)/(tabs)');
   });
 
   it('routes admin to admin dashboard', () => {
-    expect(getDashboardRoute('admin')).toBe('/(admin)');
+    expect(getDashboardRoute('admin')).toBe('/(admin)/(tabs)');
   });
 
   it('routes member to user home', () => {
-    expect(getDashboardRoute('user')).toBe('/(user)');
+    expect(getDashboardRoute('user')).toBe('/(user)/(tabs)');
   });
 });
 
@@ -69,13 +69,13 @@ describe('getPostAuthRoute', () => {
   it('returns admin dashboard for admin with personal pin', () => {
     expect(
       getPostAuthRoute(profile({ role: 'admin', hasPersonalPin: true }))
-    ).toBe('/(admin)');
+    ).toBe('/(admin)/(tabs)');
     expect(
       getPostAuthRoute(profile({ role: 'senior_admin', hasPersonalPin: true }))
-    ).toBe('/(admin)');
+    ).toBe('/(admin)/(tabs)');
   });
 
   it('returns user home for members', () => {
-    expect(getPostAuthRoute(profile({ role: 'user' }))).toBe('/(user)');
+    expect(getPostAuthRoute(profile({ role: 'user' }))).toBe('/(user)/(tabs)');
   });
 });

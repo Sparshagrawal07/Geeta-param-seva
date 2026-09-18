@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { AppSpinner } from '@/components/ui/app-spinner';
 import { AppText } from '@/components/ui/app-text';
-import { EmptyState } from '@/components/ui/empty-state';
+import { AppPressable } from '@/components/ui/app-pressable';
+import { ErrorState } from '@/components/ui/error-state';
 import { useAppColors } from '@/hooks/use-app-colors';
-import { triggerHaptic } from '@/lib/haptics';
 import { useLocale } from '@/providers/locale-provider';
 import { fetchGitaChapters } from '@/services/gita-scripture';
 import type { GitaChapter } from '@/types/gita-scripture';
@@ -26,11 +26,12 @@ function ChapterCard({ chapter }: { chapter: GitaChapter }) {
   const title = locale === 'hi' ? chapter.titleHi || chapter.titleEn : chapter.titleEn;
 
   return (
-    <Pressable
+    <AppPressable
       accessibilityRole="button"
       className="flex-1"
+      haptic="selection"
+      minTouchSize={0}
       onPress={() => {
-        void triggerHaptic('selection');
         router.push(`/(user)/gita/chapter/${chapter.chapterNumber}` as never);
       }}>
       <View className="min-h-[132px] flex-1 overflow-hidden rounded-2xl border border-saffron/20 bg-gp-card dark:border-gold/25 dark:bg-gp-card-dark">
@@ -66,7 +67,7 @@ function ChapterCard({ chapter }: { chapter: GitaChapter }) {
           </View>
         </View>
       </View>
-    </Pressable>
+    </AppPressable>
   );
 }
 
@@ -75,11 +76,13 @@ export function GitaChapterGrid() {
   const [chapters, setChapters] = useState<GitaChapter[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const rows = useMemo(() => chunkPairs(chapters), [chapters]);
 
   useEffect(() => {
     let active = true;
+    setLoading(true);
     void fetchGitaChapters()
       .then((data) => {
         if (!active) return;
@@ -97,7 +100,7 @@ export function GitaChapterGrid() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [reloadKey]);
 
   if (loading) {
     return (
@@ -110,7 +113,10 @@ export function GitaChapterGrid() {
   if (error) {
     return (
       <View className="flex-1 px-5 pt-6">
-        <EmptyState title={t('gitaExploreTitle')} message={t('gitaNoScripture')} />
+        <ErrorState
+          message={t('gitaNoScripture')}
+          onRetry={() => setReloadKey((value) => value + 1)}
+        />
       </View>
     );
   }

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, RefreshControl, View } from 'react-native';
+import { RefreshControl, View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 
 import { Screen } from '@/components/layout/screen';
@@ -15,8 +15,7 @@ import { FadeInView } from '@/components/ui/fade-in-view';
 import { SectionHeader } from '@/components/ui/section-header';
 import { useAuth } from '@/hooks/use-auth';
 import { useNotifications } from '@/hooks/use-notifications';
-import { formatDateTime } from '@/lib/format';
-import { triggerHaptic } from '@/lib/haptics';
+import { formatFeedDateTime } from '@/lib/format';
 import { useLocale } from '@/providers/locale-provider';
 import type { AppNotification } from '@/types/feed';
 
@@ -104,7 +103,7 @@ export default function UserNotificationsScreen() {
               {item.body}
             </TranslatedAppText>
             <AppText className="mt-2 text-xs text-gp-muted dark:text-gp-muted-dark">
-              {formatDateTime(item.createdAt, locale)}
+              {formatFeedDateTime(item.createdAt, locale)}
             </AppText>
           </SpiritualSurfaceBody>
         </SpiritualSurface>
@@ -114,6 +113,7 @@ export default function UserNotificationsScreen() {
 
   return (
     <Screen
+      showBack
       contentClassName="relative px-5 pb-10 pt-2"
       animateContent={false}
       scrollProps={{
@@ -121,10 +121,10 @@ export default function UserNotificationsScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={() => void handleRefresh()} />
         ),
       }}>
-      <MandalaWashBackdrop opacity={0.05} />
+      <MandalaWashBackdrop />
       <SectionHeader title={t('notificationsTitle')} subtitle={t('notificationsSubtitle')} />
 
-      <Pressable onPress={() => void triggerHaptic('light')} className="mb-4">
+      <View className="mb-4">
         <SpiritualSurface variant="elevated" withMandala>
           <SpiritualSurfaceBody className="py-3">
             <AppText className="text-sm leading-6 text-gp-muted dark:text-gp-muted-dark">
@@ -132,7 +132,7 @@ export default function UserNotificationsScreen() {
             </AppText>
           </SpiritualSurfaceBody>
         </SpiritualSurface>
-      </Pressable>
+      </View>
 
       {loading && !refreshing ? (
         <View className="mt-8 items-center">

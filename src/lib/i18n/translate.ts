@@ -25,6 +25,10 @@ type DynamicTranslationCache = {
   entries: Record<string, string>;
 };
 
+/** In-memory mirror so locale flips stay sync after the first warm load. */
+let memoryCache: DynamicTranslationCache | null = null;
+let memoryCacheLoad: Promise<DynamicTranslationCache> | null = null;
+
 export function applyDomainTerms(text: string): string {
   return DOMAIN_TERMS.reduce(
     (current, { pattern, hi }) => current.replace(pattern, hi),
@@ -50,19 +54,48 @@ function finalizeHiText(text: string): string {
   return sanitizeHiText(text);
 }
 
+/** Sync lookup for already-warmed translations (seamless EN ↔ HI toggles). */
+export function getCachedDynamicTranslation(text: string): string | null {
+  if (!memoryCache) return null;
+  const cached = memoryCache.entries[text];
+  return cached ? finalizeHiText(cached) : null;
+}
+
 async function loadDynamicCache(): Promise<DynamicTranslationCache> {
-  try {
-    const raw = await AsyncStorage.getItem(DYNAMIC_CACHE_KEY);
-    if (!raw) return { version: CACHE_VERSION, entries: {} };
-    const parsed = JSON.parse(raw) as DynamicTranslationCache;
-    if (parsed.version !== CACHE_VERSION) return { version: CACHE_VERSION, entries: {} };
-    return parsed;
-  } catch {
-    return { version: CACHE_VERSION, entries: {} };
-  }
+  if (memoryCache) return memoryCache;
+  if (memoryCacheLoad) return memoryCacheLoad;
+
+  memoryCacheLoad = (async () => {
+    try {
+      const raw = await AsyncStorage.getItem(DYNAMIC_CACHE_KEY);
+      if (!raw) {
+        memoryCache = { version: CACHE_VERSION, entries: {} };
+        return memoryCache;
+      }
+      const parsed = JSON.parse(raw) as DynamicTranslationCache;
+      memoryCache =
+        parsed.version !== CACHE_VERSION
+          ? { version: CACHE_VERSION, entries: {} }
+          : parsed;
+      return memoryCache;
+    } catch {
+      memoryCache = { version: CACHE_VERSION, entries: {} };
+      return memoryCache;
+    } finally {
+      memoryCacheLoad = null;
+    }
+  })();
+
+  return memoryCacheLoad;
+}
+
+/** Prefetch AsyncStorage cache into memory so the first Hindi switch is not blocked. */
+export function warmTranslationCache(): void {
+  void loadDynamicCache();
 }
 
 async function saveDynamicCache(cache: DynamicTranslationCache) {
+  memoryCache = cache;
   await AsyncStorage.setItem(DYNAMIC_CACHE_KEY, JSON.stringify(cache));
 }
 

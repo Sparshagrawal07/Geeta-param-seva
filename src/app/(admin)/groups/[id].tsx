@@ -1,6 +1,6 @@
 import { Redirect, router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { GroupSettingsModal } from '@/components/admin/group-settings-modal';
@@ -8,6 +8,7 @@ import { Screen } from '@/components/layout/screen';
 import { SpiritualSurface, SpiritualSurfaceBody } from '@/components/spiritual/spiritual-surface';
 import { AppText } from '@/components/ui/app-text';
 import { AppSpinner } from '@/components/ui/app-spinner';
+import { GlassIconButton } from '@/components/ui/glass-pressable';
 import { ErrorState } from '@/components/ui/error-state';
 import { InfoCard } from '@/components/ui/info-card';
 import { LoadingOverlay } from '@/components/ui/loading-overlay';
@@ -93,7 +94,7 @@ export default function GroupDetailScreen() {
   );
 
   if (!isSeniorAdmin(profile?.role)) {
-    return <Redirect href="/(admin)" />;
+    return <Redirect href="/(admin)/(tabs)" />;
   }
 
   if (loading && !group) {
@@ -120,18 +121,14 @@ export default function GroupDetailScreen() {
       title={group.name}
       contentClassName="relative px-5 pb-10 pt-2"
       rightAction={
-        <Pressable
+        <GlassIconButton
           accessibilityLabel={t('groupSettings')}
           disabled={refreshing}
-          onPress={() => {
-            void triggerHaptic('light');
-            setSettingsOpen(true);
-          }}
-          hitSlop={12}
-          className="rounded-full border border-saffron/20 bg-saffron/10 p-2 dark:border-gold/25 dark:bg-gold/15"
-          style={{ opacity: refreshing ? 0.4 : 1 }}>
+          haptic="light"
+          onPress={() => setSettingsOpen(true)}
+          fallbackClassName="items-center justify-center rounded-full border border-saffron/20 bg-saffron/10 dark:border-gold/25 dark:bg-gold/15">
           <Ionicons name="settings-outline" size={22} color={colors.saffron} />
-        </Pressable>
+        </GlassIconButton>
       }>
       <View style={{ opacity: refreshing ? 0.55 : 1 }}>
         {group.description ? (

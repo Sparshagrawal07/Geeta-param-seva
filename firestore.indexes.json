@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "content_reports",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "groupId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "polls",
       "queryScope": "COLLECTION",
       "fields": [

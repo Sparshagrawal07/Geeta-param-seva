@@ -3,6 +3,7 @@ import { RefreshControl, View } from 'react-native';
 
 import { AnnouncementPostCard } from '@/components/feed/announcement-post-card';
 import { FeedDeleteOverlay } from '@/components/feed/feed-delete-overlay';
+import { ReportContentModal } from '@/components/feed/report-content-modal';
 import { SevaPostCard } from '@/components/feed/seva-post-card';
 import { AppSpinner } from '@/components/ui/app-spinner';
 import { EmptyState } from '@/components/ui/empty-state';
@@ -108,6 +109,8 @@ interface GroupFeedListProps {
   onRefresh: () => void;
   canDeletePost?: (item: FeedItem) => boolean;
   confirmDelete?: (item: FeedItem, onDismissOverlay: () => void) => void;
+  /** When true (default), show Report Content on each post. */
+  allowReport?: boolean;
 }
 
 export interface GroupFeedListHandle {
@@ -125,11 +128,14 @@ export const GroupFeedList = forwardRef<GroupFeedListHandle, GroupFeedListProps>
     onRefresh,
     canDeletePost,
     confirmDelete,
+    allowReport = true,
   },
   ref
 ) {
   const { t } = useLocale();
+  const { profile } = useAuth();
   const [activeDelete, setActiveDelete] = useState<ActiveDeleteState | null>(null);
+  const [reportItem, setReportItem] = useState<FeedItem | null>(null);
 
   const dismissDeleteMode = useCallback(() => {
     setActiveDelete(null);
@@ -170,6 +176,14 @@ export const GroupFeedList = forwardRef<GroupFeedListHandle, GroupFeedListProps>
                 }
               : {};
 
+            const reportProps =
+              allowReport && profile && item.createdBy !== profile.uid
+                ? {
+                    reportable: true as const,
+                    onReport: () => setReportItem(item),
+                  }
+                : {};
+
             const wrap = (card: ReactNode) => (
               <FadeInView key={item.id} index={index} slide>
                 {card}
@@ -177,10 +191,10 @@ export const GroupFeedList = forwardRef<GroupFeedListHandle, GroupFeedListProps>
             );
 
             if (item.type === 'seva') {
-              return wrap(<SevaPostCard post={item} {...deleteProps} />);
+              return wrap(<SevaPostCard post={item} {...deleteProps} {...reportProps} />);
             }
 
-            return wrap(<AnnouncementPostCard post={item} {...deleteProps} />);
+            return wrap(<AnnouncementPostCard post={item} {...deleteProps} {...reportProps} />);
           })}
         </View>
       </View>
@@ -197,6 +211,14 @@ export const GroupFeedList = forwardRef<GroupFeedListHandle, GroupFeedListProps>
             confirmDelete(activeItem, () => undefined);
           }
         }}
+      />
+
+      <ReportContentModal
+        visible={!!reportItem}
+        item={reportItem}
+        reporterUid={profile?.uid ?? ''}
+        reporterName={profile?.name ?? ''}
+        onClose={() => setReportItem(null)}
       />
     </>
   );

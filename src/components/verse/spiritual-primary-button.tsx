@@ -1,10 +1,10 @@
-import { ActivityIndicator, Pressable, View } from 'react-native';
+import { ActivityIndicator, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 
+import { AppPressable } from '@/components/ui/app-pressable';
 import { AppText } from '@/components/ui/app-text';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { spiritualGradients } from '@/lib/spiritual-ui';
-import { triggerHaptic } from '@/lib/haptics';
 
 interface SpiritualPrimaryButtonProps {
   label: string;
@@ -25,16 +25,16 @@ export function SpiritualPrimaryButton({
   const { isDark } = useAppColors();
   const colors = isDark ? spiritualGradients.primaryButton.dark : spiritualGradients.primaryButton.light;
   const isLarge = size === 'lg';
+  const isDisabled = disabled || loading;
 
   return (
-    <Pressable
-      disabled={disabled || loading}
-      onPress={() => {
-        void triggerHaptic('medium');
-        onPress();
-      }}
+    <AppPressable
+      disabled={isDisabled}
+      onPress={onPress}
+      haptic="light"
+      minTouchSize={0}
       className="w-full overflow-hidden rounded-2xl shadow-md shadow-black/20"
-      style={{ opacity: disabled || loading ? 0.65 : 1 }}>
+      style={{ opacity: isDisabled ? 0.65 : 1 }}>
       <LinearGradient
         colors={[...colors]}
         start={{ x: 0, y: 0.5 }}
@@ -62,6 +62,6 @@ export function SpiritualPrimaryButton({
           </View>
         )}
       </LinearGradient>
-    </Pressable>
+    </AppPressable>
   );
 }

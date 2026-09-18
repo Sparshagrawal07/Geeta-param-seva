@@ -55,6 +55,16 @@ export function listItemDelay(index: number, reduceMotion: boolean, cap = 6) {
   return Math.min(index, cap) * 40;
 }
 
+export function themeCrossfade(reduceMotion: boolean) {
+  if (reduceMotion) {
+    return { duration: 0 };
+  }
+  return {
+    duration: 320,
+    easing: Easing.out(Easing.cubic),
+  };
+}
+
 export function springSelect(reduceMotion: boolean) {
   return (value: number) =>
     reduceMotion

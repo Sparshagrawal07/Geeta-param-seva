@@ -426,13 +426,21 @@ export default function AdminPracticeScreen() {
         </SpiritualSurfaceBody>
       </SpiritualSurface>
 
-      <Modal visible={Boolean(editMember)} animationType="slide" onRequestClose={() => setEditMember(null)}>
+      <Modal
+        visible={Boolean(editMember)}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setEditMember(null)}>
         <SafeAreaView className="flex-1 bg-gp-bg dark:bg-gp-bg-dark" edges={['top', 'bottom']}>
-          <View className="flex-row items-center justify-between border-b border-gp-border px-5 py-3 dark:border-gp-border-dark">
+          <View className="flex-row items-center justify-between border-b border-gp-border px-5 py-4 dark:border-gp-border-dark">
             <AppText bold className="text-lg text-gp-text dark:text-gp-text-dark">
               {editMember?.name ?? t('practiceEditAssignment')}
             </AppText>
-            <Pressable onPress={() => setEditMember(null)}>
+            <Pressable
+              onPress={() => setEditMember(null)}
+              hitSlop={12}
+              disabled={savingEdit}
+              style={{ opacity: savingEdit ? 0.5 : 1 }}>
               <Ionicons name="close" size={24} color={colors.placeholder} />
             </Pressable>
           </View>

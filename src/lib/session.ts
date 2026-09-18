@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
+import { TERMS_ACCEPTED_STORAGE_KEY } from '@/lib/terms-agreement';
+
 export const SELECTED_GROUP_STORAGE_KEY = 'app.selected-group-id';
 export const THEME_STORAGE_KEY = 'app.theme.v1';
 export const LOCALE_STORAGE_KEY = 'app.locale';
@@ -13,6 +15,7 @@ const PRESERVED_KEYS = new Set<string>([
   THEME_STORAGE_KEY,
   LOCALE_STORAGE_KEY,
   PUSH_DEVICE_ID_KEY,
+  TERMS_ACCEPTED_STORAGE_KEY,
 ]);
 
 /** Stable per-install device id (also used for push + sole-session enforcement). */

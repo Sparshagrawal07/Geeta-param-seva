@@ -41,3 +41,12 @@ export function MandalaWashBackdrop({ opacity }: { opacity?: number }) {
     </View>
   );
 }
+
+/** Gold wash for Gita screens — uses mandalaGold registry slot. */
+export function MandalaGoldBackdrop({ opacity }: { opacity?: number }) {
+  return (
+    <View pointerEvents="none" className="absolute inset-0 overflow-hidden items-center justify-center">
+      <MandalaAccent kind="gold" opacity={opacity} />
+    </View>
+  );
+}

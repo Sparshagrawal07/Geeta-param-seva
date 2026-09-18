@@ -184,7 +184,7 @@ async function navigateFromNotificationData(
     type === 'practice_report' ||
     screen === 'practice'
   ) {
-    router.push((isAdmin ? '/(admin)/practice' : '/(user)') as never);
+    router.push((isAdmin ? '/(admin)/(tabs)/practice' : '/(user)/(tabs)') as never);
     return;
   }
 
@@ -194,7 +194,7 @@ async function navigateFromNotificationData(
     type === 'daily_verse' ||
     screen === 'verse'
   ) {
-    router.push((isAdmin ? '/(admin)/practice' : '/(user)') as never);
+    router.push((isAdmin ? '/(admin)/(tabs)/practice' : '/(user)/(tabs)') as never);
     return;
   }
 
@@ -205,7 +205,7 @@ async function navigateFromNotificationData(
 
   if (isAdmin) {
     if (goAlerts && !goFeed) {
-      router.push('/(admin)/practice' as never);
+      router.push('/(admin)/(tabs)/practice' as never);
       return;
     }
     router.push('/(admin)/feed');
@@ -213,10 +213,10 @@ async function navigateFromNotificationData(
   }
 
   if (goFeed && !goAlerts) {
-    router.push('/(user)/seva' as never);
+    router.push('/(user)/(tabs)/seva' as never);
     return;
   }
-  router.push('/(user)');
+  router.push('/(user)/(tabs)');
 }
 
 export function AuthNavigationBoundary({ children }: PropsWithChildren) {

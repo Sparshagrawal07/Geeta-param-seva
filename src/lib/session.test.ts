@@ -10,6 +10,7 @@ import {
   SELECTED_GROUP_STORAGE_KEY,
   THEME_STORAGE_KEY,
 } from '@/lib/session';
+import { TERMS_ACCEPTED_STORAGE_KEY } from '@/lib/terms-agreement';
 
 describe('clearSessionState', () => {
   beforeEach(async () => {
@@ -32,6 +33,12 @@ describe('clearSessionState', () => {
     await AsyncStorage.setItem(LOCALE_STORAGE_KEY, 'hi');
     await clearSessionState();
     expect(await AsyncStorage.getItem(LOCALE_STORAGE_KEY)).toBe('hi');
+  });
+
+  it('preserves terms agreement key', async () => {
+    await AsyncStorage.setItem(TERMS_ACCEPTED_STORAGE_KEY, '1');
+    await clearSessionState();
+    expect(await AsyncStorage.getItem(TERMS_ACCEPTED_STORAGE_KEY)).toBe('1');
   });
 
   it('does not delete push device id key', async () => {
@@ -63,6 +70,7 @@ describe('isPreservedSessionKey', () => {
     expect(isPreservedSessionKey(THEME_STORAGE_KEY)).toBe(true);
     expect(isPreservedSessionKey(LOCALE_STORAGE_KEY)).toBe(true);
     expect(isPreservedSessionKey(PUSH_DEVICE_ID_KEY)).toBe(true);
+    expect(isPreservedSessionKey(TERMS_ACCEPTED_STORAGE_KEY)).toBe(true);
   });
 
   it('returns false for session-scoped keys', () => {

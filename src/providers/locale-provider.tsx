@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createContext,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -12,6 +13,7 @@ import {
 import { type Locale, type MessageKey, messages } from '@/lib/i18n/messages';
 import { hiMessages } from '@/lib/i18n/messages-hi';
 import { getSystemLocale } from '@/lib/i18n/system-locale';
+import { warmTranslationCache } from '@/lib/i18n/translate';
 
 const LOCALE_STORAGE_KEY = 'app.locale';
 
@@ -28,6 +30,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>(getSystemLocale);
 
   useEffect(() => {
+    warmTranslationCache();
     void AsyncStorage.getItem(LOCALE_STORAGE_KEY).then((stored) => {
       if (stored === 'en' || stored === 'hi') {
         setLocaleState(stored);
@@ -38,7 +41,9 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setLocale = useCallback((nextLocale: Locale) => {
-    setLocaleState(nextLocale);
+    startTransition(() => {
+      setLocaleState(nextLocale);
+    });
     void AsyncStorage.setItem(LOCALE_STORAGE_KEY, nextLocale);
   }, []);
 

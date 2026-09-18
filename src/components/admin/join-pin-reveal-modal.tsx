@@ -3,6 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { AppButton } from '@/components/ui/button';
 import { AppText } from '@/components/ui/app-text';
+import { GlassSurface } from '@/components/ui/glass-surface';
 import { triggerHaptic } from '@/lib/haptics';
 import { useLocale } from '@/providers/locale-provider';
 
@@ -47,7 +48,9 @@ export function JoinPinRevealModal({
     <Modal visible={visible} animationType="fade" transparent onRequestClose={onClose}>
       <View className="flex-1 items-center justify-center bg-black/50 px-6">
         <SafeAreaView edges={['top', 'bottom']} className="w-full max-w-md">
-          <View className="rounded-2xl border border-gp-border bg-gp-card p-5 dark:border-gp-border-dark dark:bg-gp-card-dark">
+          <GlassSurface
+            style={{ borderRadius: 16, padding: 20 }}
+            fallbackClassName="rounded-2xl border border-gp-border bg-gp-card p-5 dark:border-gp-border-dark dark:bg-gp-card-dark">
             <AppText bold className="text-lg text-gp-text dark:text-gp-text-dark">
               {t('joinPinRevealTitle')}
             </AppText>
@@ -84,7 +87,7 @@ export function JoinPinRevealModal({
                 {t('joinPinShownOnce')}
               </AppText>
             </Pressable>
-          </View>
+          </GlassSurface>
         </SafeAreaView>
       </View>
     </Modal>

@@ -8,8 +8,8 @@ import { VerseKrishnaBackdrop } from '@/components/verse/verse-krishna-backdrop'
 import { LotusDivider } from '@/components/verse/lotus-divider';
 import { VerseReferencePill } from '@/components/verse/verse-reference-pill';
 import { AppText } from '@/components/ui/app-text';
+import { AppSpinner } from '@/components/ui/app-spinner';
 import { ErrorState } from '@/components/ui/error-state';
-import { LoadingScreen } from '@/components/ui/loading-screen';
 import { FadeInView } from '@/components/ui/fade-in-view';
 import { useLocale } from '@/providers/locale-provider';
 import { fetchGitaVerse, resolveGitaVerseContent } from '@/services/gita-scripture';
@@ -54,11 +54,19 @@ export default function GitaVerseScreen() {
     void load();
   }, [load]);
 
-  if (loading) return <LoadingScreen />;
+  if (loading) {
+    return (
+      <Screen showBack title={t('gitaReadVerse')} animateContent={false}>
+        <View className="items-center py-16">
+          <AppSpinner />
+        </View>
+      </Screen>
+    );
+  }
 
   if (error || !verse) {
     return (
-      <Screen showBack title={t('gitaReadVerse')}>
+      <Screen showBack title={t('gitaReadVerse')} animateContent={false}>
         <ErrorState message={error || t('errorUnexpected')} onRetry={() => void load()} />
       </Screen>
     );
@@ -69,13 +77,13 @@ export default function GitaVerseScreen() {
   const devanagariRegular = locale === 'hi' ? { fontFamily: 'NotoSansDevanagari_400Regular' as const } : undefined;
 
   return (
-    <Screen showBack title={t('gitaReadVerse')} contentClassName="px-5 pb-10">
+    <Screen showBack title={t('gitaReadVerse')} contentClassName="px-5 pb-10" animateContent={false}>
       <FadeInView slide>
         <View className="items-center">
           <VerseReferencePill reference={content.reference} />
         </View>
 
-        <SpiritualSurface variant="verse" className="mt-5">
+        <SpiritualSurface variant="verse" mandalaOpacity={0.06} className="mt-5">
           <SpiritualSurfaceBody className="relative overflow-hidden">
             <VerseKrishnaBackdrop />
 

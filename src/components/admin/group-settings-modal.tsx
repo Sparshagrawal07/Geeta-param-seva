@@ -193,7 +193,7 @@ export function GroupSettingsModal({
 
   const openPeople = () => {
     onClose();
-    router.push('/(admin)/members');
+    router.push('/(admin)/(tabs)/members');
   };
 
   const nameChanged = name.trim() !== group.name;

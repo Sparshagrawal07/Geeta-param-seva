@@ -68,6 +68,12 @@ export default function AdminMoreScreen() {
             subtitle={t('feedGroupHint')}
             onPress={() => router.push('/(admin)/feed')}
           />
+          <MoreRow
+            icon="flag-outline"
+            label={t('contentReportsTitle')}
+            subtitle={t('contentReportsSubtitle')}
+            onPress={() => router.push('/(admin)/reports')}
+          />
           {senior ? (
             <MoreRow
               icon="layers-outline"

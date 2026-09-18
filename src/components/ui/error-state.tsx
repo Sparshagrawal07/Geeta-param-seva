@@ -1,7 +1,10 @@
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
 
+import { MandalaAccent } from '@/components/spiritual/mandala-accent';
 import { AppButton } from '@/components/ui/button';
+import { AppText } from '@/components/ui/app-text';
 import { useAppColors } from '@/hooks/use-app-colors';
+import { spiritualDesignTokens } from '@/lib/spiritual-assets';
 import { useLocale } from '@/providers/locale-provider';
 
 interface ErrorStateProps {
@@ -16,24 +19,19 @@ export function ErrorState({ message, onRetry, retryLabel }: ErrorStateProps) {
 
   return (
     <View
+      className="relative items-center overflow-hidden rounded-2xl border px-4 py-5"
       style={{
-        borderRadius: 12,
-        paddingHorizontal: 16,
-        paddingVertical: 20,
         backgroundColor: colors.destructiveMutedBg,
-        borderWidth: 1,
         borderColor: colors.destructiveBorder,
-        alignItems: 'center',
       }}>
-      <Text
-        style={{
-          color: colors.destructiveText,
-          textAlign: 'center',
-          fontSize: 15,
-          lineHeight: 22,
-        }}>
+      <View pointerEvents="none" className="absolute inset-0 overflow-hidden opacity-80">
+        <MandalaAccent kind="wash" opacity={spiritualDesignTokens.washOpacity.error} />
+      </View>
+      <AppText
+        className="relative z-[1] text-center text-[15px] leading-[22px]"
+        style={{ color: colors.destructiveText }}>
         {message}
-      </Text>
+      </AppText>
       {onRetry ? (
         <AppButton
           label={retryLabel ?? t('retry')}

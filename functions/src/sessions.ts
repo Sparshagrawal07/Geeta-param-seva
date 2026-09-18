@@ -92,6 +92,66 @@ export async function registerSoleSession(input: {
   return { sessionId: deviceId };
 }
 
+/**
+ * Force-sign-out every device for a user (e.g. roster deactivation).
+ * Marks sessions inactive, disables devices/push, clears activeSessionId, revokes refresh tokens.
+ */
+export async function revokeAllUserSessions(uid: string): Promise<void> {
+  const userRef = db.collection('users').doc(uid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) {
+    try {
+      await adminAuth.revokeRefreshTokens(uid);
+    } catch {
+      // User may not exist in Auth yet.
+    }
+    return;
+  }
+
+  const sessionsRef = userRef.collection('sessions');
+  const devicesRef = userRef.collection('devices');
+  const [sessionsSnap, devicesSnap] = await Promise.all([sessionsRef.get(), devicesRef.get()]);
+  const batch = db.batch();
+  const now = FieldValue.serverTimestamp();
+  const deviceIds: string[] = [];
+
+  for (const entry of sessionsSnap.docs) {
+    batch.set(entry.ref, { active: false, revokedAt: now }, { merge: true });
+  }
+
+  for (const entry of devicesSnap.docs) {
+    batch.set(entry.ref, { enabled: false, updatedAt: now }, { merge: true });
+    deviceIds.push(entry.id);
+  }
+
+  batch.set(
+    userRef,
+    {
+      activeSessionId: FieldValue.delete(),
+      activeSessionUpdatedAt: now,
+    },
+    { merge: true }
+  );
+
+  await batch.commit();
+
+  await Promise.all(
+    deviceIds.map((id) =>
+      syncUserPushTokenIndex({
+        uid,
+        deviceId: id,
+        enabled: false,
+      })
+    )
+  );
+
+  try {
+    await adminAuth.revokeRefreshTokens(uid);
+  } catch {
+    // Ignore if Auth user is missing.
+  }
+}
+
 export function isSessionActive(data: Record<string, unknown> | undefined): boolean {
   return data?.active === true;
 }

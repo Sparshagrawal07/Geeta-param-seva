@@ -1,14 +1,14 @@
 import {
   ActivityIndicator,
-  Pressable,
   Text,
   View,
   type PressableProps,
   type ViewStyle,
 } from 'react-native';
 
+import { AppPressable } from '@/components/ui/app-pressable';
 import { useAppColors } from '@/hooks/use-app-colors';
-import { type HapticKind, hapticForButtonVariant, triggerHaptic } from '@/lib/haptics';
+import { type HapticKind, hapticForButtonVariant } from '@/lib/haptics';
 
 type ButtonVariant = 'primary' | 'secondary' | 'destructive' | 'ghost';
 type ButtonSize = 'sm' | 'md';
@@ -22,7 +22,7 @@ interface AppButtonProps extends Omit<PressableProps, 'style'> {
   fullWidth?: boolean;
   containerStyle?: ViewStyle;
   /** Haptic feedback on press; defaults by variant */
-  haptic?: HapticKind | 'auto';
+  haptic?: HapticKind | 'auto' | 'none';
 }
 
 const SIZE_STYLES = {
@@ -89,13 +89,8 @@ export function AppButton({
     }
   })();
 
-  const handlePress: PressableProps['onPress'] = (event) => {
-    if (!isDisabled) {
-      const feedback = haptic === 'auto' ? hapticForButtonVariant(variant) : haptic;
-      void triggerHaptic(feedback);
-    }
-    onPress?.(event);
-  };
+  const resolvedHaptic =
+    haptic === 'auto' ? hapticForButtonVariant(variant) : haptic === 'none' ? 'none' : haptic;
 
   return (
     <View
@@ -103,15 +98,17 @@ export function AppButton({
         { alignSelf: fullWidth ? 'stretch' : 'flex-start', width: fullWidth ? '100%' : undefined },
         containerStyle,
       ]}>
-      <Pressable
+      <AppPressable
         {...props}
         disabled={isDisabled}
-        onPress={handlePress}
-        style={({ pressed }) => ({
-          opacity: pressed ? 0.85 : 1,
+        onPress={onPress}
+        haptic={isDisabled ? 'none' : resolvedHaptic}
+        minTouchSize={0}
+        style={{
           width: fullWidth ? '100%' : undefined,
           alignSelf: fullWidth ? 'stretch' : 'flex-start',
-        })}>
+          opacity: isDisabled ? 0.65 : 1,
+        }}>
         <View
           style={{
             width: fullWidth ? '100%' : undefined,
@@ -142,7 +139,7 @@ export function AppButton({
             </Text>
           )}
         </View>
-      </Pressable>
+      </AppPressable>
     </View>
   );
 }

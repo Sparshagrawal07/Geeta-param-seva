@@ -15,6 +15,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ErrorBoundary } from '@/components/ui/error-boundary';
+import { ThemeCrossfade } from '@/components/ui/theme-crossfade';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { ThemeProvider, useThemeSettings } from '@/providers/theme-provider';
 import { AuthProvider } from '@/providers/auth-provider';
@@ -60,7 +61,7 @@ function RootShell({ children }: { children: ReactNode }) {
 
   return (
     <GestureHandlerRootView style={[{ flex: 1, backgroundColor: colors.background }, accentVars]}>
-      {children}
+      <ThemeCrossfade>{children}</ThemeCrossfade>
     </GestureHandlerRootView>
   );
 }
