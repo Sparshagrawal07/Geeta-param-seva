@@ -1,7 +1,20 @@
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import {
+  collection,
+  documentId,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  startAfter,
+  where,
+} from 'firebase/firestore';
 
 import type { UserProfile } from '@/lib/users';
 import { db } from '@/lib/firebase';
+import {
+  MEMBER_LIST_MAX_PAGES,
+  MEMBER_LIST_PAGE_SIZE,
+} from '@/lib/backend-query-policy';
 
 function mapUser(id: string, data: Record<string, unknown>): UserProfile {
   const role = data.role === 'senior_admin' ? 'senior_admin' : data.role === 'admin' ? 'admin' : 'user';
@@ -65,9 +78,32 @@ async function fetchScopedMembersFromFirestore(scopeGroupIds: string[]): Promise
   return [...byUid.values()];
 }
 
+async function fetchBoundedSeniorMembers(): Promise<UserProfile[]> {
+  const members: UserProfile[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < MEMBER_LIST_MAX_PAGES; page += 1) {
+    const constraints = [
+      orderBy(documentId(), 'asc'),
+      ...(cursor ? [startAfter(cursor)] : []),
+      limit(MEMBER_LIST_PAGE_SIZE),
+    ];
+    const snapshot = await getDocs(query(collection(db, 'users'), ...constraints));
+    members.push(
+      ...snapshot.docs.map((entry) =>
+        mapUser(entry.id, entry.data() as Record<string, unknown>)
+      )
+    );
+    if (snapshot.size < MEMBER_LIST_PAGE_SIZE) break;
+    cursor = snapshot.docs[snapshot.docs.length - 1]!.id;
+  }
+
+  return members;
+}
+
 /**
  * Fetch members.
- * - Senior admin: all users, or scoped to selected group(s).
+ * - Senior admin: paginated/capped users, or scoped to selected group(s).
  * - Regular admin: users in assigned groups only.
  */
 export async function fetchMembers(
@@ -79,7 +115,16 @@ export async function fetchMembers(
     return mergeMembers(scoped, currentProfile);
   }
 
-  const snapshot = await getDocs(collection(db, 'users'));
-  const members = snapshot.docs.map((entry) => mapUser(entry.id, entry.data() as Record<string, unknown>));
-  return mergeMembers(members, currentProfile);
+  if (currentProfile?.role === 'admin') {
+    const scoped = await fetchScopedMembersFromFirestore(
+      currentProfile.assignedGroupIds ?? []
+    );
+    return mergeMembers(scoped, currentProfile);
+  }
+
+  if (currentProfile?.role !== 'senior_admin') {
+    return mergeMembers([], currentProfile);
+  }
+
+  return mergeMembers(await fetchBoundedSeniorMembers(), currentProfile);
 }

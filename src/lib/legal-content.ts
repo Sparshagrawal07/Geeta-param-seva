@@ -142,7 +142,7 @@ export function getTermsOfServiceSections(audience: LegalAudience): LegalSection
       {
         title: 'Group join PINs',
         body:
-          'Join PINs are temporary access codes (typically valid about 24 hours). Regenerating a PIN invalidates the previous one. Do not post join PINs publicly.',
+          'Join PINs are temporary access codes (typically valid about 72 hours). Regenerating a PIN invalidates the previous one. Do not post join PINs publicly.',
       },
       {
         title: 'Content and notifications',

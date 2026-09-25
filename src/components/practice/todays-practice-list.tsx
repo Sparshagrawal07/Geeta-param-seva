@@ -13,12 +13,12 @@ import { useAppColors } from '@/hooks/use-app-colors';
 import { triggerHaptic } from '@/lib/haptics';
 import type { PracticeItemToday } from '@/lib/practice';
 import { useLocale } from '@/providers/locale-provider';
-import { markAllPracticeCompleteRemote } from '@/services/practice';
 
 interface TodaysPracticeListProps {
   items: PracticeItemToday[];
   loading?: boolean;
-  onCompleted?: () => void;
+  pendingItemKeys?: ReadonlySet<string>;
+  onMarkAllComplete?: () => Promise<void>;
 }
 
 function PracticeCardSkeleton() {
@@ -42,7 +42,12 @@ function itemTitle(item: PracticeItemToday, locale: string, chapterWord: string)
   return name ? `${chapter} · ${name}` : chapter;
 }
 
-export function TodaysPracticeList({ items, loading = false, onCompleted }: TodaysPracticeListProps) {
+export function TodaysPracticeList({
+  items,
+  loading = false,
+  pendingItemKeys = new Set(),
+  onMarkAllComplete,
+}: TodaysPracticeListProps) {
   const { t, locale } = useLocale();
   const colors = useAppColors();
   const [completing, setCompleting] = useState(false);
@@ -86,12 +91,11 @@ export function TodaysPracticeList({ items, loading = false, onCompleted }: Toda
   };
 
   const handleMarkAllComplete = async () => {
-    if (allComplete) return;
+    if (allComplete || !onMarkAllComplete) return;
     try {
       setCompleting(true);
-      await markAllPracticeCompleteRemote();
+      await onMarkAllComplete();
       void triggerHaptic('success');
-      onCompleted?.();
     } catch {
       void triggerHaptic('error');
     } finally {
@@ -137,7 +141,11 @@ export function TodaysPracticeList({ items, loading = false, onCompleted }: Toda
                       {item.completed ? t('practiceItemComplete') : t('practiceItemOpenHint')}
                     </AppText>
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color={colors.placeholder} />
+                  <Ionicons
+                    name={pendingItemKeys.has(item.itemKey) ? 'cloud-upload-outline' : 'chevron-forward'}
+                    size={18}
+                    color={pendingItemKeys.has(item.itemKey) ? colors.saffron : colors.placeholder}
+                  />
                 </Pressable>
               ))}
             </View>

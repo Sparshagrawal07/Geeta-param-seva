@@ -1,6 +1,15 @@
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 
+import { getLocalCache } from '@/lib/cache';
+import {
+  adminPracticeCacheKey,
+  groupCacheScope,
+  LOCAL_CACHE_POLICY,
+  practiceMutationId,
+  todayPracticeCacheKey,
+  userCacheScope,
+} from '@/lib/cache/keys';
 import { auth, db, functions } from '@/lib/firebase';
 import {
   normalizePracticeItems,
@@ -11,6 +20,15 @@ import {
   type PracticeItem,
   type PracticeItemToday,
 } from '@/lib/practice';
+import {
+  applyOptimisticPracticeCompletion,
+  applyPendingPracticeMutations,
+  pendingPracticeItemKeys,
+  PRACTICE_MARK_ALL_OPERATION,
+  PRACTICE_MARK_ONE_OPERATION,
+  practiceRetryDelay,
+  type PracticeCompletionMutation,
+} from '@/lib/practice-local';
 
 const CHAPTER_TITLE_FALLBACK: Record<number, { titleEn: string; titleHi: string }> = {
   1: { titleEn: 'Arjuna Vishada Yoga', titleHi: 'अर्जुन विषाद योग' },
@@ -32,6 +50,8 @@ const CHAPTER_TITLE_FALLBACK: Record<number, { titleEn: string; titleHi: string 
   17: { titleEn: 'Shraddhatraya Vibhaga Yoga', titleHi: 'श्रद्धात्रय विभाग योग' },
   18: { titleEn: 'Moksha Sanyasa Yoga', titleHi: 'मोक्ष संन्यास योग' },
 };
+const todayRefreshInFlight = new Map<string, Promise<MyPracticeToday>>();
+const adminPracticeRefreshInFlight = new Map<string, Promise<PracticeAdminOverview>>();
 
 function phoneToUid(phoneNumber: string): string {
   const digits = phoneNumber.replace(/\D/g, '');
@@ -121,6 +141,153 @@ export async function getMyPracticeTodayRemote(): Promise<MyPracticeToday> {
   }
 }
 
+export async function getCachedMyPracticeToday(uid: string, dateKey = practiceDateKey()) {
+  const cache = await getLocalCache();
+  return cache.get<MyPracticeToday>(todayPracticeCacheKey(dateKey), {
+    scope: userCacheScope(uid),
+  });
+}
+
+async function listPracticeMutations(uid: string) {
+  const cache = await getLocalCache();
+  return cache.listMutations<PracticeCompletionMutation>({
+    scope: userCacheScope(uid),
+    statuses: ['pending', 'processing', 'failed'],
+  });
+}
+
+async function storeMyPracticeToday(uid: string, today: MyPracticeToday) {
+  const cache = await getLocalCache();
+  await cache.set(todayPracticeCacheKey(today.practiceDateKey), today, {
+    scope: userCacheScope(uid),
+    staleForMs: LOCAL_CACHE_POLICY.practiceStaleMs,
+    expiresInMs: LOCAL_CACHE_POLICY.practiceExpiresMs,
+  });
+}
+
+export function refreshMyPracticeToday(uid: string): Promise<MyPracticeToday> {
+  if (auth.currentUser?.uid !== uid) return Promise.reject(new Error('AUTH_CHANGED'));
+  const existing = todayRefreshInFlight.get(uid);
+  if (existing) return existing;
+  const request = (async () => {
+    const remote = await getMyPracticeTodayRemote();
+    if (auth.currentUser?.uid !== uid) throw new Error('AUTH_CHANGED');
+    const pending = await listPracticeMutations(uid);
+    const today = applyPendingPracticeMutations(remote, pending);
+    await storeMyPracticeToday(uid, today);
+    return today;
+  })().finally(() => {
+    if (todayRefreshInFlight.get(uid) === request) todayRefreshInFlight.delete(uid);
+  });
+  todayRefreshInFlight.set(uid, request);
+  return request;
+}
+
+export async function getPendingPracticeItemKeys(
+  uid: string,
+  today: MyPracticeToday
+): Promise<Set<string>> {
+  return pendingPracticeItemKeys(today, await listPracticeMutations(uid));
+}
+
+export async function queuePracticeCompletion(input: {
+  uid: string;
+  today: MyPracticeToday;
+  itemKey?: string;
+}): Promise<MyPracticeToday> {
+  if (auth.currentUser?.uid !== input.uid) throw new Error('AUTH_CHANGED');
+  const dateKey = input.today.practiceDateKey;
+  const payload: PracticeCompletionMutation = {
+    uid: input.uid,
+    dateKey,
+    ...(input.itemKey ? { itemKey: input.itemKey } : {}),
+  };
+  const cache = await getLocalCache();
+  const scope = userCacheScope(input.uid);
+
+  if (!input.itemKey) {
+    const queued = await cache.listMutations<PracticeCompletionMutation>({
+      scope,
+      statuses: ['pending', 'processing', 'failed'],
+    });
+    await Promise.all(
+      queued
+        .filter(
+          (item) =>
+            item.operation === PRACTICE_MARK_ONE_OPERATION &&
+            item.payload.dateKey === dateKey
+        )
+        .map((item) => cache.deleteMutation(item.id))
+    );
+  }
+
+  await cache.enqueueMutation({
+    id: practiceMutationId(payload),
+    scope,
+    operation: input.itemKey
+      ? PRACTICE_MARK_ONE_OPERATION
+      : PRACTICE_MARK_ALL_OPERATION,
+    payload,
+  });
+
+  const optimistic = applyOptimisticPracticeCompletion(input.today, payload);
+  await storeMyPracticeToday(input.uid, optimistic);
+  return optimistic;
+}
+
+const replayInFlight = new Map<string, Promise<void>>();
+
+export function replayPracticeOutbox(uid: string): Promise<void> {
+  const existing = replayInFlight.get(uid);
+  if (existing) return existing;
+  const request = replayPracticeOutboxInternal(uid).finally(() => {
+    if (replayInFlight.get(uid) === request) replayInFlight.delete(uid);
+  });
+  replayInFlight.set(uid, request);
+  return request;
+}
+
+async function replayPracticeOutboxInternal(uid: string): Promise<void> {
+  if (auth.currentUser?.uid !== uid) return;
+  const cache = await getLocalCache();
+  const mutations = await cache.listMutations<PracticeCompletionMutation>({
+    scope: userCacheScope(uid),
+    statuses: ['pending', 'processing', 'failed'],
+    readyAt: Date.now(),
+    limit: 25,
+  });
+
+  for (const mutation of mutations) {
+    if (mutation.payload.uid !== uid || auth.currentUser?.uid !== uid) continue;
+    await cache.updateMutation(mutation.id, {
+      status: 'processing',
+      lastError: null,
+    });
+    try {
+      if (
+        mutation.operation === PRACTICE_MARK_ONE_OPERATION &&
+        mutation.payload.itemKey
+      ) {
+        await markPracticeItemCompleteRemote(mutation.payload.itemKey);
+      } else if (mutation.operation === PRACTICE_MARK_ALL_OPERATION) {
+        await markAllPracticeCompleteRemote();
+      } else {
+        await cache.deleteMutation(mutation.id);
+        continue;
+      }
+      await cache.deleteMutation(mutation.id);
+    } catch (error) {
+      const attempts = mutation.attempts + 1;
+      await cache.updateMutation(mutation.id, {
+        status: 'failed',
+        attempts,
+        nextAttemptAt: Date.now() + practiceRetryDelay(attempts),
+        lastError: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+}
+
 export async function fetchMemberPracticeAssignment(
   uidOrPhone: string
 ): Promise<MemberPracticeAssignment | null> {
@@ -182,6 +349,49 @@ export async function getPracticeAdminOverviewRemote(groupId: string): Promise<P
   };
 }
 
+export async function getCachedPracticeAdminOverview(
+  uid: string,
+  groupId: string,
+  dateKey = practiceDateKey()
+) {
+  const cache = await getLocalCache();
+  return cache.get<PracticeAdminOverview>(
+    adminPracticeCacheKey(groupId, dateKey),
+    { scope: groupCacheScope(uid, groupId) }
+  );
+}
+
+export function refreshCachedPracticeAdminOverview(
+  uid: string,
+  groupId: string
+): Promise<PracticeAdminOverview> {
+  if (auth.currentUser?.uid !== uid) return Promise.reject(new Error('AUTH_CHANGED'));
+  const scope = groupCacheScope(uid, groupId);
+  const existing = adminPracticeRefreshInFlight.get(scope);
+  if (existing) return existing;
+  const request = (async () => {
+    const overview = await getPracticeAdminOverviewRemote(groupId);
+    if (auth.currentUser?.uid !== uid) throw new Error('AUTH_CHANGED');
+    const cache = await getLocalCache();
+    await cache.set(
+      adminPracticeCacheKey(groupId, overview.practiceDateKey || practiceDateKey()),
+      overview,
+      {
+        scope,
+        staleForMs: LOCAL_CACHE_POLICY.adminPracticeStaleMs,
+        expiresInMs: LOCAL_CACHE_POLICY.adminPracticeExpiresMs,
+      }
+    );
+    return overview;
+  })().finally(() => {
+    if (adminPracticeRefreshInFlight.get(scope) === request) {
+      adminPracticeRefreshInFlight.delete(scope);
+    }
+  });
+  adminPracticeRefreshInFlight.set(scope, request);
+  return request;
+}
+
 export async function sendPracticeReminderRemote(input: {
   groupId: string;
   uid?: string;
@@ -203,12 +413,12 @@ export type PracticeMonthlyReportFile = {
   fileName: string;
   mimeType: string;
   base64?: string;
-  rows?: Array<{
+  rows?: {
     name: string;
     phoneNumber: string;
     assignment: string;
     cells: Record<string, 'Yes' | 'No' | ''>;
-  }>;
+  }[];
 };
 
 /** Admin: fetch beautified monthly Yes/No practice Excel (base64 + row fallback). */

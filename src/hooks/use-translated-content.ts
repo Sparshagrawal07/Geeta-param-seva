@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   getCachedDynamicTranslation,
@@ -14,24 +14,19 @@ function resolveInitial(locale: string, text: string) {
 
 export function useTranslatedText(text: string): string {
   const { locale } = useLocale();
-  const [translated, setTranslated] = useState(() => resolveInitial(locale, text));
+  const [translation, setTranslation] = useState(() => ({
+    locale,
+    source: text,
+    value: resolveInitial(locale, text),
+  }));
 
   useEffect(() => {
-    if (locale === 'en' || !text.trim()) {
-      setTranslated(text);
-      return;
-    }
-
-    const cached = getCachedDynamicTranslation(text);
-    if (cached) {
-      setTranslated(cached);
-      return;
-    }
+    if (locale === 'en' || !text.trim()) return;
 
     let cancelled = false;
     void translateDynamicText(text).then((result) => {
       if (!cancelled) {
-        setTranslated(result);
+        setTranslation({ locale, source: text, value: result });
       }
     });
 
@@ -40,41 +35,32 @@ export function useTranslatedText(text: string): string {
     };
   }, [locale, text]);
 
-  return locale === 'en' ? text : translated;
+  if (locale === 'en') return text;
+  if (translation.locale === locale && translation.source === text) return translation.value;
+  return getCachedDynamicTranslation(text) ?? text;
 }
 
 export function useTranslatedTexts(texts: string[]): string[] {
   const { locale } = useLocale();
-  const signature = useMemo(() => texts.join('\u001e'), [texts]);
-  const [translated, setTranslated] = useState(() => {
-    if (locale === 'en') return texts;
-    return texts.map((text) => getCachedDynamicTranslation(text) ?? text);
-  });
+  const signature = JSON.stringify(texts);
+  const [translation, setTranslation] = useState(() => ({
+    locale,
+    signature,
+    values:
+      locale === 'en'
+        ? texts
+        : texts.map((text) => getCachedDynamicTranslation(text) ?? text),
+  }));
 
   useEffect(() => {
-    if (locale === 'en') {
-      setTranslated(texts);
-      return;
-    }
+    if (locale === 'en') return;
 
-    if (texts.length === 0) {
-      setTranslated(texts);
-      return;
-    }
-
-    const fromMemory = texts.map((text) => getCachedDynamicTranslation(text));
-    if (fromMemory.every((value) => value != null)) {
-      setTranslated(fromMemory as string[]);
-      return;
-    }
-
-    // Show whatever we already know immediately, then fill gaps.
-    setTranslated(texts.map((text, index) => fromMemory[index] ?? text));
-
+    const requestedTexts = JSON.parse(signature) as string[];
+    if (requestedTexts.length === 0) return;
     let cancelled = false;
-    void translateDynamicTexts(texts).then((result) => {
+    void translateDynamicTexts(requestedTexts).then((result) => {
       if (!cancelled) {
-        setTranslated(result);
+        setTranslation({ locale, signature, values: result });
       }
     });
 
@@ -83,5 +69,9 @@ export function useTranslatedTexts(texts: string[]): string[] {
     };
   }, [locale, signature]);
 
-  return locale === 'en' ? texts : translated;
+  if (locale === 'en') return texts;
+  if (translation.locale === locale && translation.signature === signature) {
+    return translation.values;
+  }
+  return texts.map((text) => getCachedDynamicTranslation(text) ?? text);
 }

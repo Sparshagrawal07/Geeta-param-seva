@@ -1,7 +1,7 @@
 {
   "name": "geetaparamseva",
   "main": "expo-router/entry",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "license": "UNLICENSED",
   "dependencies": {
@@ -11,6 +11,7 @@
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "9.1.0",
+    "@react-native-community/netinfo": "12.0.1",
     "@react-native-community/slider": "5.2.0",
     "@react-native-masked-view/masked-view": "0.3.2",
     "@react-native-segmented-control/segmented-control": "2.5.7",
@@ -23,6 +24,7 @@
     "expo-font": "~57.0.3",
     "expo-glass-effect": "~57.0.3",
     "expo-haptics": "~57.0.2",
+    "expo-image": "~57.0.4",
     "expo-linear-gradient": "~57.0.1",
     "expo-linking": "~57.0.9",
     "expo-localization": "~57.0.1",
@@ -30,6 +32,7 @@
     "expo-router": "~57.0.19",
     "expo-sharing": "~57.0.18",
     "expo-splash-screen": "~57.0.8",
+    "expo-sqlite": "~57.0.2",
     "expo-status-bar": "~57.0.1",
     "firebase": "^12.14.0",
     "nativewind": "^4.2.5",
@@ -82,6 +85,9 @@
     "seed:ads-config:apply": "node scripts/seed-ads-remote-config.cjs --apply",
     "prepare:icons": "node scripts/prepare-brand-icons.mjs",
     "prepare:spiritual": "node scripts/prepare-spiritual-placeholders.mjs",
+    "optimize:spiritual": "node scripts/optimize-spiritual-assets.mjs",
+    "generate:gita": "node scripts/generate-gita-content.mjs",
+    "generate:gita:check": "node scripts/generate-gita-content.mjs --check",
     "optimize:logo": "node scripts/prepare-brand-icons.mjs",
     "build:android:apk": "npx eas-cli build --platform android --profile preview",
     "build:android:apk:arm64": "npx eas-cli build --platform android --profile preview-arm64",
@@ -97,6 +103,7 @@
     "build:android:aab:local": "ANDROID_HOME=/opt/homebrew/share/android-commandlinetools ANDROID_SDK_ROOT=/opt/homebrew/share/android-commandlinetools EAS_BUILD_NO_EXPO_GO_WARNING=true npx eas-cli build --platform android --profile production --local --output dist/Geeta-Param-Seva.aab",
     "install:android:apk": "npx eas-cli build:run -p android --latest --profile preview",
     "size:js": "npx expo export --platform android --output-dir .size-report/bundle && du -h .size-report/bundle/_expo/static/js/android/*.hbc",
+    "size:js:check": "node scripts/check-js-bundle-size.mjs",
     "build:legal-pages": "node scripts/build-legal-pages.mjs"
   },
   "optionalDependencies": {

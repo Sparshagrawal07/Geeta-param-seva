@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { RefreshControl, ScrollView, View } from 'react-native';
-import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GitaExploreEntry } from '@/components/gita/gita-explore-entry';
@@ -10,57 +9,33 @@ import { HomeHeroSection } from '@/components/verse/home-hero-section';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
 import { useAuth } from '@/hooks/use-auth';
-import type { PracticeItemToday } from '@/lib/practice';
+import { useLocalPerformanceSpan } from '@/hooks/use-local-performance-span';
+import { useTodaysPractice } from '@/hooks/use-todays-practice';
+import { requestCoordinatedRefresh } from '@/lib/cache/refresh-coordinator';
+import { LOCAL_PERFORMANCE_BUDGETS } from '@/lib/local-performance';
 import { useLocale } from '@/providers/locale-provider';
-import { getMyPracticeTodayRemote } from '@/services/practice';
 
 export default function UserHomeScreen() {
   const { profile, loading: authLoading } = useAuth();
   const { t } = useLocale();
 
   const groupId = profile?.groupId ?? null;
-  const [items, setItems] = useState<PracticeItemToday[]>([]);
-  const [loading, setLoading] = useState(true);
+  const practice = useTodaysPractice(Boolean(groupId));
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState('');
-
-  const load = useCallback(async () => {
-    if (authLoading) return;
-    if (!groupId) {
-      setItems([]);
-      setError('');
-      setLoading(false);
-      return;
-    }
-    try {
-      setError('');
-      const today = await getMyPracticeTodayRemote();
-      setItems(today.items);
-    } catch {
-      setItems([]);
-      setError(t('errorUnexpected'));
-    } finally {
-      setLoading(false);
-    }
-  }, [authLoading, groupId, t]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load])
+  useLocalPerformanceSpan(
+    'screen.home.cached-ready',
+    !authLoading && !practice.loading,
+    LOCAL_PERFORMANCE_BUDGETS.cachedScreenReadyMs
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
+    requestCoordinatedRefresh('manual');
+    await practice.refresh();
     setRefreshing(false);
-  }, [load]);
+  }, [practice]);
 
-  if (!groupId) {
+  if (!groupId && !authLoading) {
     return (
       <SafeAreaView className="flex-1 bg-gp-bg px-5 dark:bg-gp-bg-dark" edges={['top']}>
         <EmptyState title={t('pendingGroupTitle')} message={t('pendingGroupMessage')} />
@@ -69,7 +44,7 @@ export default function UserHomeScreen() {
   }
 
   return (
-    <View className="flex-1 bg-gp-bg dark:bg-gp-bg-dark">
+    <View testID="screen-home" className="flex-1 bg-gp-bg dark:bg-gp-bg-dark">
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 28 }}
@@ -78,14 +53,19 @@ export default function UserHomeScreen() {
 
         {/* Practice CTA stack sits above decorative feather; ads never share this layer. */}
         <View className="relative z-30 px-5" collapsable={false}>
-          {error ? (
+          {practice.error ? (
             <View className="mb-4">
-              <ErrorState message={error} onRetry={() => void load()} />
+              <ErrorState message={practice.error} onRetry={() => void practice.refresh()} />
             </View>
           ) : null}
 
           <View className="-mt-1">
-            <TodaysPracticeList items={items} loading={loading} onCompleted={() => void load()} />
+            <TodaysPracticeList
+              items={practice.items}
+              loading={practice.loading}
+              pendingItemKeys={practice.pendingItemKeys}
+              onMarkAllComplete={practice.markAllComplete}
+            />
           </View>
 
           <GitaExploreEntry />

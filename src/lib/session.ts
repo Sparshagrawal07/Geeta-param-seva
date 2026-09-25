@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
+import { clearSessionCache } from '@/lib/cache';
 import { TERMS_ACCEPTED_STORAGE_KEY } from '@/lib/terms-agreement';
 
 export const SELECTED_GROUP_STORAGE_KEY = 'app.selected-group-id';
@@ -27,7 +28,7 @@ export async function getStableDeviceId(): Promise<string> {
   return generated;
 }
 
-/** Clears user-scoped AsyncStorage keys on sign-out. Preserves theme, locale, and device id. */
+/** Clears mutable user/session state while preserving global preferences and device identity. */
 export async function clearSessionState(): Promise<void> {
   const keysToRemove: string[] = [...SESSION_KEYS];
   try {
@@ -42,7 +43,10 @@ export async function clearSessionState(): Promise<void> {
   } catch {
     // Ignore enumeration failures; still clear known session keys.
   }
-  await AsyncStorage.multiRemove(keysToRemove);
+  await Promise.all([
+    AsyncStorage.multiRemove(keysToRemove),
+    clearSessionCache(),
+  ]);
 }
 
 export function isPreservedSessionKey(key: string): boolean {

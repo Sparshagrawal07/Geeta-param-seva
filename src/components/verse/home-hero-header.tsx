@@ -1,5 +1,4 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import MaskedView from '@react-native-masked-view/masked-view';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import { useState, type ReactNode } from 'react';
@@ -39,41 +38,10 @@ interface HomeHeroHeaderProps {
 
 function HeroTempleArtwork({
   slot,
-  variant,
 }: {
   slot: Extract<SpiritualAssetSlot, 'heroTemple' | 'authTemple'>;
-  variant: 'home' | 'auth';
 }) {
-  const blend = spiritualDesignTokens.heroTempleBlend[variant];
-  const midAlpha = Math.round(blend.midOpacity * 255)
-    .toString(16)
-    .padStart(2, '0');
-  const bottomAlpha = Math.round(blend.bottomOpacity * 255)
-    .toString(16)
-    .padStart(2, '0');
-
-  return (
-    <>
-      <SpiritualAssetImage slot={slot} />
-      <MaskedView
-        pointerEvents="none"
-        style={{ position: 'absolute', inset: 0 }}
-        maskElement={
-          <LinearGradient
-            colors={[
-              'rgba(0,0,0,0)',
-              'rgba(0,0,0,0)',
-              `#000000${midAlpha}`,
-              `#000000${bottomAlpha}`,
-            ]}
-            locations={[0, blend.maskStart, blend.maskMid, 1]}
-            style={{ flex: 1 }}
-          />
-        }>
-        <SpiritualAssetImage slot={slot} blurRadius={blend.blurRadius} />
-      </MaskedView>
-    </>
-  );
+  return <SpiritualAssetImage slot={slot} />;
 }
 
 function resolveReflectionOpacity(isDark: boolean) {
@@ -92,12 +60,10 @@ function resolveReflectionOpacity(isDark: boolean) {
 }
 
 function HeroTempleReflection({
-  slot,
   variant,
   heroHeight,
   isDark,
 }: {
-  slot: Extract<SpiritualAssetSlot, 'heroTemple' | 'authTemple'>;
   variant: 'home' | 'auth';
   heroHeight: number;
   isDark: boolean;
@@ -124,53 +90,7 @@ function HeroTempleReflection({
         overflow: 'hidden',
         backgroundColor: canvas,
       }}>
-      <MaskedView
-        pointerEvents="none"
-        style={{ position: 'absolute', inset: 0 }}
-        maskElement={
-          <LinearGradient
-            colors={[
-              `rgba(0,0,0,${reflectionOpacity.top})`,
-              `rgba(0,0,0,${reflectionOpacity.middle})`,
-              `rgba(0,0,0,${reflectionOpacity.lower})`,
-              'rgba(0,0,0,0)',
-            ]}
-            locations={[0, 0.38, 0.76, 1]}
-            style={{ flex: 1 }}
-          />
-        }>
-        <View style={{ flex: 1 }}>
-          {spiritualDesignTokens.heroTempleBlend.reflectionBands.map((band) => {
-            const top = Math.round(renderedHeight * band.start);
-            const height = Math.ceil(renderedHeight * (band.end - band.start)) + 1;
-
-            return (
-              <View
-                key={`${band.start}-${band.end}`}
-                style={{
-                  position: 'absolute',
-                  top,
-                  right: 0,
-                  left: 0,
-                  height,
-                  overflow: 'hidden',
-                }}>
-                <View
-                  style={{
-                    position: 'absolute',
-                    top: -top,
-                    right: -band.xOffset,
-                    left: band.xOffset,
-                    height: heroHeight,
-                    transform: [{ scaleY: -1 }],
-                  }}>
-                  <SpiritualAssetImage slot={slot} blurRadius={band.blurRadius} />
-                </View>
-              </View>
-            );
-          })}
-        </View>
-      </MaskedView>
+      <SpiritualAssetImage slot="heroTempleReflection" />
 
       <LinearGradient
         pointerEvents="none"
@@ -234,7 +154,7 @@ export function HomeHeroHeader({
           const nextHeight = Math.round(event.nativeEvent.layout.height);
           setHeroHeight((current) => (current === nextHeight ? current : nextHeight));
         }}>
-        <HeroTempleArtwork slot="heroTemple" variant="home" />
+        <HeroTempleArtwork slot="heroTemple" />
         <HeroScrim isDark={isDark} />
 
         <View className="relative z-10 flex-row items-start justify-end">
@@ -282,7 +202,6 @@ export function HomeHeroHeader({
         </FadeInView>
       </View>
       <HeroTempleReflection
-        slot="heroTemple"
         variant="home"
         heroHeight={heroHeight}
         isDark={isDark}
@@ -307,7 +226,7 @@ export function AuthHeroHeader({ title, subtitle }: { title: string; subtitle?: 
           const nextHeight = Math.round(event.nativeEvent.layout.height);
           setHeroHeight((current) => (current === nextHeight ? current : nextHeight));
         }}>
-        <HeroTempleArtwork slot="authTemple" variant="auth" />
+        <HeroTempleArtwork slot="authTemple" />
         <HeroScrim isDark={isDark} />
 
         <View
@@ -340,7 +259,6 @@ export function AuthHeroHeader({ title, subtitle }: { title: string; subtitle?: 
         <LotusDivider className="relative z-10 my-2" />
       </View>
       <HeroTempleReflection
-        slot="authTemple"
         variant="auth"
         heroHeight={heroHeight}
         isDark={isDark}

@@ -3,7 +3,10 @@ import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 
-import { wipeDailyFeedContent } from './feed-cleanup';
+import {
+  cleanupExpiredBackendRecords,
+  wipeDailyFeedContent,
+} from './feed-cleanup';
 import {
   notifyCommunityPostPublishedCore,
   type CommunityPostNotifyType,
@@ -495,40 +498,9 @@ export const notifyPracticeMonthlyReport = onSchedule(
   }
 );
 
-/** Instant push + in-app alert after admin publishes seva or group message. */
-export const notifyCommunityPostPublished = onCall(callableOptions, async (request) => {
-  try {
-    if (!request.auth?.uid) {
-      throw new HttpsError('unauthenticated', 'Sign in required.');
-    }
-    const groupId = typeof request.data?.groupId === 'string' ? request.data.groupId.trim() : '';
-    const postTypeRaw =
-      typeof request.data?.postType === 'string' ? request.data.postType.trim().toLowerCase() : '';
-    const postType =
-      postTypeRaw === 'seva' || postTypeRaw === 'announcement' ? postTypeRaw : null;
-    if (!groupId || !postType) {
-      throw new HttpsError('invalid-argument', 'groupId and postType (seva|announcement) are required.');
-    }
-    await assertCanManageGroup(request.auth.uid, groupId);
-
-    const postTitle =
-      typeof request.data?.postTitle === 'string' ? request.data.postTitle.trim() : undefined;
-    const postId = typeof request.data?.postId === 'string' ? request.data.postId.trim() : undefined;
-
-    return await notifyCommunityPostPublishedCore({
-      groupId,
-      postType,
-      postTitle,
-      postId,
-    });
-  } catch (error) {
-    throw toHttpsError(error);
-  }
-});
-
 /**
- * Reliability backstop: whenever a seva/announcement post is written, fan out push
- * even if the client callable fails. Idempotent with `notifyCommunityPostPublished`.
+ * The single post-notification path. Firestore create events are at-least-once,
+ * so the deterministic notification ID keeps retries idempotent.
  */
 export const onCommunityPostCreated = onDocumentCreated(
   {
@@ -593,8 +565,11 @@ export const wipeDailyFeed = onSchedule(
     timeZone: 'Asia/Kolkata',
   },
   async () => {
-    const result = await wipeDailyFeedContent();
-    console.log('wipeDailyFeed', result);
+    const [feed, retention] = await Promise.all([
+      wipeDailyFeedContent(),
+      cleanupExpiredBackendRecords(),
+    ]);
+    console.log('wipeDailyFeed', { feed, retention });
   }
 );
 

@@ -14,9 +14,26 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
-      - run: npm run build:legal-pages
-      - run: npm test
-      - run: npm run typecheck
-      - run: npm run functions:build
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Verify deterministic Gita bundle freshness
+        run: node scripts/generate-gita-content.mjs --check
+      - name: Verify asset budgets
+        run: npx vitest run src/lib/assets-policy.test.ts
+      - name: Build legal pages
+        run: npm run build:legal-pages
+      - name: Test
+        run: npm test
+      - name: Typecheck app
+        run: npm run typecheck
+      - name: Build Functions
+        run: npm run functions:build
+      - name: Prepare ignored Expo config
+        run: test -f app.json || printf '{}\n' > app.json
+      - name: Export production Android JavaScript
+        run: CI=1 NODE_ENV=production npx expo export --platform android --output-dir .size-report/bundle --clear
+      - name: Enforce JavaScript bundle budget
+        run: node scripts/check-js-bundle-size.mjs
 

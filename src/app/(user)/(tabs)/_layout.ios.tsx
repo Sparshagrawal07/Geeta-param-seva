@@ -11,7 +11,7 @@ import { useLocale } from '@/providers/locale-provider';
 export default function UserNativeTabsLayout() {
   const { t } = useLocale();
   const { isDark } = useAppColors();
-  const { hasUnread, refresh, clearBadge } = useSevaTabBadge();
+  const { hasUnread, clearBadge } = useSevaTabBadge();
   const chrome = getSpiritualNativeTabsChrome();
 
   const navigationTheme = {
@@ -33,12 +33,7 @@ export default function UserNativeTabsLayout() {
         badgeBackgroundColor={chrome.badgeBackgroundColor}
         blurEffect={chrome.blurEffect}
         disableTransparentOnScrollEdge={chrome.disableTransparentOnScrollEdge}
-        minimizeBehavior={chrome.minimizeBehavior}
-        screenListeners={{
-          focus: () => {
-            void refresh();
-          },
-        }}>
+        minimizeBehavior={chrome.minimizeBehavior}>
         <NativeTabs.Trigger name="index">
           <NativeTabs.Trigger.Label>{t('tabHome')}</NativeTabs.Trigger.Label>
           <NativeTabs.Trigger.Icon sf={{ default: 'house', selected: 'house.fill' }} />

@@ -8,6 +8,8 @@ import { AppText } from '@/components/ui/app-text';
 import { AppPressable } from '@/components/ui/app-pressable';
 import { ErrorState } from '@/components/ui/error-state';
 import { useAppColors } from '@/hooks/use-app-colors';
+import { useLocalPerformanceSpan } from '@/hooks/use-local-performance-span';
+import { LOCAL_PERFORMANCE_BUDGETS } from '@/lib/local-performance';
 import { useLocale } from '@/providers/locale-provider';
 import { fetchGitaChapters } from '@/services/gita-scripture';
 import type { GitaChapter } from '@/types/gita-scripture';
@@ -79,6 +81,11 @@ export function GitaChapterGrid() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const rows = useMemo(() => chunkPairs(chapters), [chapters]);
+  useLocalPerformanceSpan(
+    'screen.gita.bundled-ready',
+    !loading && !error,
+    LOCAL_PERFORMANCE_BUDGETS.cachedScreenReadyMs
+  );
 
   useEffect(() => {
     let active = true;
@@ -123,6 +130,7 @@ export function GitaChapterGrid() {
 
   return (
     <ScrollView
+      testID="screen-gita"
       className="flex-1"
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 28 }}>

@@ -1,4 +1,5 @@
 import { getRemoteConfig, fetchAndActivate, getValue } from 'firebase/remote-config';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createContext,
   useCallback,
@@ -8,7 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { Platform } from 'react-native';
+import { InteractionManager, Platform } from 'react-native';
 
 import { app } from '@/lib/firebase';
 import {
@@ -29,6 +30,8 @@ interface AdsContextValue {
   ready: boolean;
   config: AdsRuntimeConfig;
   native: AdsNativeModule | null;
+  nativeResolved: boolean;
+  sdkResolved: boolean;
   isAdmin: boolean;
   unitIdFor: (slot: 1 | 2) => string | null;
   canShow: (screen: AdScreen, slot?: 1 | 2) => boolean;
@@ -36,6 +39,31 @@ interface AdsContextValue {
 }
 
 const AdsContext = createContext<AdsContextValue | null>(null);
+const ADS_CONFIG_CACHE_KEY = 'gps.ads.runtimeConfig.v1';
+
+function parseCachedConfig(raw: string | null): AdsRuntimeConfig | null {
+  if (!raw) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<AdsRuntimeConfig>;
+    return parseAdsRemoteValues(
+      {
+        [ADS_REMOTE_KEYS.enabled]: String(value.enabled ?? ''),
+        [ADS_REMOTE_KEYS.maxHome]: String(value.maxHome ?? ''),
+        [ADS_REMOTE_KEYS.showHome]: String(value.showHome ?? ''),
+        [ADS_REMOTE_KEYS.showSeva]: String(value.showSeva ?? ''),
+        [ADS_REMOTE_KEYS.showProfile]: String(value.showProfile ?? ''),
+        [ADS_REMOTE_KEYS.showAdmins]: String(value.showAdmins ?? ''),
+        [ADS_REMOTE_KEYS.bannerAndroid]: value.bannerAndroid,
+        [ADS_REMOTE_KEYS.bannerIos]: value.bannerIos,
+        [ADS_REMOTE_KEYS.bannerAndroid2]: value.bannerAndroid2,
+        [ADS_REMOTE_KEYS.bannerIos2]: value.bannerIos2,
+      },
+      DEFAULT_ADS_CONFIG
+    );
+  } catch {
+    return null;
+  }
+}
 
 function readRemoteConfig(): AdsRuntimeConfig {
   try {
@@ -54,12 +82,14 @@ function readRemoteConfig(): AdsRuntimeConfig {
 export function AdsProvider({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
   const isAdmin = isAdminRole(profile?.role);
-  const [native] = useState<AdsNativeModule | null>(() => loadAdsNative());
+  const [native, setNative] = useState<AdsNativeModule | null>(null);
+  const [nativeResolved, setNativeResolved] = useState(false);
   const [config, setConfig] = useState<AdsRuntimeConfig>(DEFAULT_ADS_CONFIG);
   const [ready, setReady] = useState(false);
   const [sdkReady, setSdkReady] = useState(false);
+  const [sdkResolved, setSdkResolved] = useState(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { apply?: boolean }) => {
     try {
       const rc = getRemoteConfig(app);
       rc.settings = {
@@ -86,25 +116,58 @@ export function AdsProvider({ children }: { children: ReactNode }) {
       if (__DEV__ && !next.enabled) {
         next.enabled = true;
       }
-      setConfig(next);
+      if (options?.apply !== false) setConfig(next);
+      await AsyncStorage.setItem(ADS_CONFIG_CACHE_KEY, JSON.stringify(next));
     } catch {
       const next = readRemoteConfig();
       if (__DEV__ && !next.enabled) {
         next.enabled = true;
       }
-      setConfig(next);
-    } finally {
-      setReady(true);
+      if (options?.apply !== false) setConfig(next);
+      await AsyncStorage.setItem(ADS_CONFIG_CACHE_KEY, JSON.stringify(next)).catch(() => undefined);
     }
   }, []);
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    void AsyncStorage.getItem(ADS_CONFIG_CACHE_KEY)
+      .then((raw) => {
+        if (cancelled) return;
+        const cached = parseCachedConfig(raw);
+        if (cached) setConfig(cached);
+      })
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let delayTimer: ReturnType<typeof setTimeout> | undefined;
+    const task = InteractionManager.runAfterInteractions(() => {
+      delayTimer = setTimeout(() => {
+        if (cancelled) return;
+        const loadedNative = loadAdsNative();
+        setNative(loadedNative);
+        setNativeResolved(true);
+        if (!loadedNative) setSdkResolved(true);
+        // Keep this session's placement geometry stable; freshly fetched values
+        // are persisted and become active on the next launch.
+        void refresh({ apply: false });
+      }, 500);
+    });
+    return () => {
+      cancelled = true;
+      task.cancel?.();
+      if (delayTimer) clearTimeout(delayTimer);
+    };
   }, [refresh]);
 
   useEffect(() => {
     if (!native) {
-      setSdkReady(false);
       return;
     }
     let cancelled = false;
@@ -121,12 +184,14 @@ export function AdsProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setSdkReady(true);
       } catch {
         if (!cancelled) setSdkReady(false);
+      } finally {
+        if (!cancelled) setSdkResolved(true);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [native]);
+  }, [native, nativeResolved]);
 
   const unitIdFor = useCallback(
     (slot: 1 | 2) =>
@@ -159,12 +224,14 @@ export function AdsProvider({ children }: { children: ReactNode }) {
       ready,
       config,
       native,
+      nativeResolved,
+      sdkResolved,
       isAdmin,
       unitIdFor,
       canShow,
       refresh,
     }),
-    [ready, config, native, isAdmin, unitIdFor, canShow, refresh]
+    [ready, config, native, nativeResolved, sdkResolved, isAdmin, unitIdFor, canShow, refresh]
   );
 
   return <AdsContext.Provider value={value}>{children}</AdsContext.Provider>;

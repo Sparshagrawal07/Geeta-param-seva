@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Modal, Pressable, View } from 'react-native';
+import { memo, useCallback, useMemo, useState } from 'react';
+import { FlatList, Modal, Pressable, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
-import { useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -18,6 +17,7 @@ import { SemanticText } from '@/components/ui/semantic-text';
 import { SectionHeader } from '@/components/ui/section-header';
 import { useAppColors } from '@/hooks/use-app-colors';
 import { useGroups } from '@/hooks/use-groups';
+import { usePracticeAdminOverview } from '@/hooks/use-practice-admin-overview';
 import { useSelectedGroup } from '@/hooks/use-selected-group';
 import { useTransientMessage } from '@/hooks/use-transient-message';
 import { triggerHaptic } from '@/lib/haptics';
@@ -31,7 +31,6 @@ import { formatIncompletePracticeWhatsAppMessage } from '@/lib/practice-whatsapp
 import { useAlert } from '@/providers/alert-provider';
 import { useLocale } from '@/providers/locale-provider';
 import {
-  getPracticeAdminOverviewRemote,
   sendPracticeReminderRemote,
   setMemberPracticeAssignmentRemote,
 } from '@/services/practice';
@@ -45,20 +44,108 @@ function itemLabel(item: { type: string; chapterNumber?: number; titleEn?: strin
   return title ? `${item.chapterNumber}. ${title}` : `Adhyay ${item.chapterNumber}`;
 }
 
+const PracticeMemberRow = memo(function PracticeMemberRow({
+  member,
+  locale,
+  editLabel,
+  remindLabel,
+  noAssignmentLabel,
+  reminding,
+  saffron,
+  placeholder,
+  onEdit,
+  onRemind,
+}: {
+  member: PracticeMemberOverviewRow;
+  locale: string;
+  editLabel: string;
+  remindLabel: string;
+  noAssignmentLabel: string;
+  reminding: boolean;
+  saffron: string;
+  placeholder: string;
+  onEdit: (member: PracticeMemberOverviewRow) => void;
+  onRemind: (uid: string) => void;
+}) {
+  const edit = useCallback(() => onEdit(member), [member, onEdit]);
+  const remind = useCallback(() => onRemind(member.uid), [member.uid, onRemind]);
+
+  return (
+    <SpiritualSurface variant="elevated">
+      <SpiritualSurfaceBody className="px-4 py-4">
+        <View className="flex-row items-start gap-3">
+          <View className="min-w-0 flex-1">
+            <AppText bold className="text-base text-gp-text dark:text-gp-text-dark">
+              {member.name}
+            </AppText>
+            <AppText className="mt-0.5 text-xs text-gp-muted dark:text-gp-muted-dark">
+              {member.phoneNumber}
+            </AppText>
+            {member.items.length === 0 ? (
+              <AppText className="mt-2 text-sm text-gp-muted dark:text-gp-muted-dark">
+                {noAssignmentLabel}
+              </AppText>
+            ) : (
+              <View className="mt-2 flex-row flex-wrap gap-2">
+                {member.items.map((item) => (
+                  <View
+                    key={item.itemKey}
+                    className={`rounded-full px-2.5 py-1 ${
+                      item.completed ? 'bg-saffron/15 dark:bg-gold/15' : 'bg-gp-bg dark:bg-gp-bg-dark'
+                    }`}>
+                    <AppText
+                      className={`text-xs ${
+                        item.completed
+                          ? 'text-saffron dark:text-gold'
+                          : 'text-gp-muted dark:text-gp-muted-dark'
+                      }`}>
+                      {item.completed ? '✓ ' : ''}
+                      {itemLabel(item, locale)}
+                    </AppText>
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+          <Ionicons
+            name={member.allComplete && member.items.length > 0 ? 'checkmark-circle' : 'time-outline'}
+            size={22}
+            color={member.allComplete && member.items.length > 0 ? saffron : placeholder}
+          />
+        </View>
+        <View className="mt-3 flex-row gap-2">
+          <View className="flex-1">
+            <AppButton label={editLabel} variant="secondary" size="sm" onPress={edit} fullWidth />
+          </View>
+          {member.items.length > 0 && !member.allComplete ? (
+            <View className="flex-1">
+              <AppButton
+                label={remindLabel}
+                size="sm"
+                loading={reminding}
+                onPress={remind}
+                fullWidth
+              />
+            </View>
+          ) : null}
+        </View>
+      </SpiritualSurfaceBody>
+    </SpiritualSurface>
+  );
+});
+
+const practiceMemberKeyExtractor = (member: PracticeMemberOverviewRow) => member.uid;
+const PracticeMemberSeparator = () => <View className="h-3" />;
+
 export default function AdminPracticeScreen() {
   const { t, locale } = useLocale();
   const { alert } = useAlert();
   const colors = useAppColors();
   const { groups } = useGroups();
   const { selectedGroupId, setSelectedGroupId } = useSelectedGroup(groups);
+  const practiceOverview = usePracticeAdminOverview(selectedGroupId);
 
   const [filter, setFilter] = useState<FilterMode>('all');
-  const [members, setMembers] = useState<PracticeMemberOverviewRow[]>([]);
-  const [practiceDateKey, setPracticeDateKey] = useState('');
-  const [completeCount, setCompleteCount] = useState(0);
-  const [incompleteCount, setIncompleteCount] = useState(0);
-  const [memberCount, setMemberCount] = useState(0);
-  const [loading, setLoading] = useState(false);
   const [remindingUid, setRemindingUid] = useState<string | null>(null);
   const [remindingAll, setRemindingAll] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
@@ -68,38 +155,14 @@ export default function AdminPracticeScreen() {
   const [editMember, setEditMember] = useState<PracticeMemberOverviewRow | null>(null);
   const [editItems, setEditItems] = useState<PracticeItem[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
-
-  const load = useCallback(async () => {
-    if (!selectedGroupId) {
-      setMembers([]);
-      return;
-    }
-    try {
-      setLoading(true);
-      setError('');
-      const overview = await getPracticeAdminOverviewRemote(selectedGroupId);
-      setMembers(overview.members);
-      setPracticeDateKey(overview.practiceDateKey);
-      setCompleteCount(overview.completeCount);
-      setIncompleteCount(overview.incompleteCount);
-      setMemberCount(overview.memberCount);
-    } catch {
-      setError(t('errorUnexpected'));
-      setMembers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedGroupId, t]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-    }, [load])
+  const members = useMemo(
+    () => practiceOverview.overview?.members ?? [],
+    [practiceOverview.overview]
   );
+  const practiceDateKey = practiceOverview.overview?.practiceDateKey ?? '';
+  const completeCount = practiceOverview.overview?.completeCount ?? 0;
+  const incompleteCount = practiceOverview.overview?.incompleteCount ?? 0;
+  const memberCount = practiceOverview.overview?.memberCount ?? 0;
 
   const filtered = useMemo(() => {
     if (filter === 'incomplete') {
@@ -111,7 +174,7 @@ export default function AdminPracticeScreen() {
     return members;
   }, [filter, members]);
 
-  const openEdit = (member: PracticeMemberOverviewRow) => {
+  const openEdit = useCallback((member: PracticeMemberOverviewRow) => {
     setEditMember(member);
     setEditItems(
       member.items.map((item) =>
@@ -124,7 +187,7 @@ export default function AdminPracticeScreen() {
             }
       )
     );
-  };
+  }, []);
 
   const handleSaveEdit = async () => {
     if (!editMember || !selectedGroupId) return;
@@ -145,7 +208,7 @@ export default function AdminPracticeScreen() {
       setEditMember(null);
       showSuccess(t('practiceAssignmentSaved'));
       void triggerHaptic('success');
-      await load();
+      await practiceOverview.refresh();
     } catch {
       setError(t('errorUnexpected'));
       void triggerHaptic('error');
@@ -154,7 +217,7 @@ export default function AdminPracticeScreen() {
     }
   };
 
-  const handleRemind = async (uid?: string) => {
+  const handleRemind = useCallback(async (uid?: string) => {
     if (!selectedGroupId) return;
     try {
       if (uid) setRemindingUid(uid);
@@ -187,7 +250,27 @@ export default function AdminPracticeScreen() {
       setRemindingUid(null);
       setRemindingAll(false);
     }
-  };
+  }, [alert, clearMessage, selectedGroupId, showSuccess, t]);
+  const remindMember = useCallback((uid: string) => {
+    void handleRemind(uid);
+  }, [handleRemind]);
+  const renderMember = useCallback(
+    ({ item }: { item: PracticeMemberOverviewRow }) => (
+      <PracticeMemberRow
+        member={item}
+        locale={locale}
+        editLabel={t('practiceEditAssignment')}
+        remindLabel={t('practiceSendReminder')}
+        noAssignmentLabel={t('practiceNoAssignment')}
+        reminding={remindingUid === item.uid}
+        saffron={colors.saffron}
+        placeholder={colors.placeholder}
+        onEdit={openEdit}
+        onRemind={remindMember}
+      />
+    ),
+    [colors.placeholder, colors.saffron, locale, openEdit, remindMember, remindingUid, t]
+  );
 
   const handleCopyIncompleteWhatsApp = async () => {
     const text = formatIncompletePracticeWhatsAppMessage(members, {
@@ -247,184 +330,134 @@ export default function AdminPracticeScreen() {
   };
 
   return (
-    <Screen contentClassName="relative px-5 pb-10 pt-2" animateContent={false}>
-      <SectionHeader title={t('practiceAdminTitle')} subtitle={t('practiceAdminSubtitle')} />
-      <SpiritualSurface variant="elevated">
-        <SpiritualSurfaceBody className="py-4">
-          <FormStack>
-            <GroupScopeSelector
-              groups={groups}
-              selectedGroupId={selectedGroupId}
-              onSelect={(id) => void setSelectedGroupId(id)}
-              hint={groups.length > 1 ? t('selectGroupHint') : undefined}
-            />
-
-            {error ? <SemanticText tone="destructive">{error}</SemanticText> : null}
-            {message ? (
-              tone === 'success' ? (
-                <SemanticText tone="success">{message}</SemanticText>
-              ) : (
-                <AppText className="text-sm text-gp-muted dark:text-gp-muted-dark">{message}</AppText>
-              )
-            ) : null}
-
-            <FormSection title={t('practiceTodaySection')}>
-              <View className="gap-3 p-4">
-                {practiceDateKey ? (
-                  <AppText className="text-xs text-gp-muted dark:text-gp-muted-dark">
-                    {t('practiceDayLabel')}: {practiceDateKey}
-                  </AppText>
-                ) : null}
-                <View className="flex-row gap-3">
-                  <InfoCard label={t('practiceAssignedMembers')} value={String(memberCount)} />
-                  <InfoCard label={t('practiceCompleteCount')} value={String(completeCount)} />
-                  <InfoCard label={t('practiceIncompleteCount')} value={String(incompleteCount)} />
-                </View>
-                {incompleteCount > 0 ? (
-                  <AppButton
-                    label={t('practiceRemindAll')}
-                    variant="secondary"
-                    loading={remindingAll}
-                    onPress={() => void handleRemind()}
-                    fullWidth
+    <Screen scrollable={false} contentClassName="relative px-0 pt-2" animateContent={false}>
+      <FlatList
+        data={practiceOverview.loading ? [] : filtered}
+        keyExtractor={practiceMemberKeyExtractor}
+        renderItem={renderMember}
+        ItemSeparatorComponent={PracticeMemberSeparator}
+        ListHeaderComponent={
+          <View>
+            <SectionHeader title={t('practiceAdminTitle')} subtitle={t('practiceAdminSubtitle')} />
+            <SpiritualSurface variant="elevated">
+              <SpiritualSurfaceBody className="py-4">
+                <FormStack>
+                  <GroupScopeSelector
+                    groups={groups}
+                    selectedGroupId={selectedGroupId}
+                    onSelect={(id) => void setSelectedGroupId(id)}
+                    hint={groups.length > 1 ? t('selectGroupHint') : undefined}
                   />
-                ) : null}
-                <PracticeWhatsAppCopyButton
-                  disabled={!selectedGroupId || incompleteCount === 0}
-                  label={t('practiceCopyIncompleteWhatsApp')}
-                  onPress={() => void handleCopyIncompleteWhatsApp()}
-                />
-                <AppButton
-                  label={t('practiceDownloadReport')}
-                  variant="secondary"
-                  loading={downloadingReport}
-                  disabled={!selectedGroupId}
-                  onPress={() => void handleDownloadReport()}
-                  fullWidth
-                />
-                <AppText className="text-xs text-gp-muted dark:text-gp-muted-dark">
-                  {t('practiceDownloadReportHint')}
-                </AppText>
-              </View>
-            </FormSection>
 
-            <FormSection title={t('practiceMembersSection')}>
-              <View className="flex-row gap-2 border-b border-saffron/10 px-4 py-3 dark:border-gold/15">
-                {(['all', 'incomplete', 'complete'] as FilterMode[]).map((mode) => {
-                  const active = filter === mode;
-                  const label =
-                    mode === 'all'
-                      ? t('practiceFilterAll')
-                      : mode === 'incomplete'
-                        ? t('practiceFilterIncomplete')
-                        : t('practiceFilterComplete');
-                  return (
-                    <Pressable
-                      key={mode}
-                      onPress={() => setFilter(mode)}
-                      className={`rounded-full px-3 py-1.5 ${
-                        active ? 'bg-saffron/15 dark:bg-gold/15' : 'bg-gp-bg dark:bg-gp-bg-dark'
-                      }`}>
-                      <AppText
-                        bold
-                        className={`text-xs ${active ? 'text-saffron dark:text-gold' : 'text-gp-muted dark:text-gp-muted-dark'}`}>
-                        {label}
-                      </AppText>
-                    </Pressable>
-                  );
-                })}
-              </View>
+                  {error || practiceOverview.error ? (
+                    <SemanticText tone="destructive">
+                      {error || t('errorUnexpected')}
+                    </SemanticText>
+                  ) : null}
+                  {message ? (
+                    tone === 'success' ? (
+                      <SemanticText tone="success">{message}</SemanticText>
+                    ) : (
+                      <AppText className="text-sm text-gp-muted dark:text-gp-muted-dark">{message}</AppText>
+                    )
+                  ) : null}
 
-              {loading ? (
-                <View className="px-4 py-6">
-                  <AppText className="text-sm text-gp-muted dark:text-gp-muted-dark">{t('pleaseWait')}</AppText>
-                </View>
-              ) : filtered.length === 0 ? (
-                <View className="px-4 py-6">
-                  <AppText className="text-sm text-gp-muted dark:text-gp-muted-dark">
-                    {t('practiceNoMembers')}
-                  </AppText>
-                </View>
-              ) : (
-                filtered.map((member, index) => (
-                  <View
-                    key={member.uid}
-                    className={`px-4 py-4 ${
-                      index === filtered.length - 1 ? '' : 'border-b border-saffron/10 dark:border-gold/15'
-                    }`}>
-                    <View className="flex-row items-start gap-3">
-                      <View className="min-w-0 flex-1">
-                        <AppText bold className="text-base text-gp-text dark:text-gp-text-dark">
-                          {member.name}
+                  <FormSection title={t('practiceTodaySection')}>
+                    <View className="gap-3 p-4">
+                      {practiceDateKey ? (
+                        <AppText className="text-xs text-gp-muted dark:text-gp-muted-dark">
+                          {t('practiceDayLabel')}: {practiceDateKey}
                         </AppText>
-                        <AppText className="mt-0.5 text-xs text-gp-muted dark:text-gp-muted-dark">
-                          {member.phoneNumber}
-                        </AppText>
-                        {member.items.length === 0 ? (
-                          <AppText className="mt-2 text-sm text-gp-muted dark:text-gp-muted-dark">
-                            {t('practiceNoAssignment')}
-                          </AppText>
-                        ) : (
-                          <View className="mt-2 flex-row flex-wrap gap-2">
-                            {member.items.map((item) => (
-                              <View
-                                key={item.itemKey}
-                                className={`rounded-full px-2.5 py-1 ${
-                                  item.completed
-                                    ? 'bg-saffron/15 dark:bg-gold/15'
-                                    : 'bg-gp-bg dark:bg-gp-bg-dark'
-                                }`}>
-                                <AppText
-                                  className={`text-xs ${
-                                    item.completed
-                                      ? 'text-saffron dark:text-gold'
-                                      : 'text-gp-muted dark:text-gp-muted-dark'
-                                  }`}>
-                                  {item.completed ? '✓ ' : ''}
-                                  {itemLabel(item, locale)}
-                                </AppText>
-                              </View>
-                            ))}
-                          </View>
-                        )}
+                      ) : null}
+                      <View className="flex-row gap-3">
+                        <InfoCard label={t('practiceAssignedMembers')} value={String(memberCount)} />
+                        <InfoCard label={t('practiceCompleteCount')} value={String(completeCount)} />
+                        <InfoCard label={t('practiceIncompleteCount')} value={String(incompleteCount)} />
                       </View>
-                      <Ionicons
-                        name={member.allComplete && member.items.length > 0 ? 'checkmark-circle' : 'time-outline'}
-                        size={22}
-                        color={
-                          member.allComplete && member.items.length > 0 ? colors.saffron : colors.placeholder
-                        }
-                      />
-                    </View>
-                    <View className="mt-3 flex-row gap-2">
-                      <View className="flex-1">
+                      {incompleteCount > 0 ? (
                         <AppButton
-                          label={t('practiceEditAssignment')}
+                          label={t('practiceRemindAll')}
                           variant="secondary"
-                          size="sm"
-                          onPress={() => openEdit(member)}
+                          loading={remindingAll}
+                          onPress={() => void handleRemind()}
                           fullWidth
                         />
-                      </View>
-                      {member.items.length > 0 && !member.allComplete ? (
-                        <View className="flex-1">
-                          <AppButton
-                            label={t('practiceSendReminder')}
-                            size="sm"
-                            loading={remindingUid === member.uid}
-                            onPress={() => void handleRemind(member.uid)}
-                            fullWidth
-                          />
-                        </View>
                       ) : null}
+                      <PracticeWhatsAppCopyButton
+                        disabled={!selectedGroupId || incompleteCount === 0}
+                        label={t('practiceCopyIncompleteWhatsApp')}
+                        onPress={() => void handleCopyIncompleteWhatsApp()}
+                      />
+                      <AppButton
+                        label={t('practiceDownloadReport')}
+                        variant="secondary"
+                        loading={downloadingReport}
+                        disabled={!selectedGroupId}
+                        onPress={() => void handleDownloadReport()}
+                        fullWidth
+                      />
+                      <AppText className="text-xs text-gp-muted dark:text-gp-muted-dark">
+                        {t('practiceDownloadReportHint')}
+                      </AppText>
                     </View>
-                  </View>
-                ))
-              )}
-            </FormSection>
-          </FormStack>
-        </SpiritualSurfaceBody>
-      </SpiritualSurface>
+                  </FormSection>
+                </FormStack>
+              </SpiritualSurfaceBody>
+            </SpiritualSurface>
+
+            <SpiritualSurface variant="elevated" className="mt-7 mb-3">
+              <SpiritualSurfaceBody className="py-3">
+                <AppText bold className="mb-3 text-base text-gp-text dark:text-gp-text-dark">
+                  {t('practiceMembersSection')}
+                </AppText>
+                <View className="flex-row gap-2">
+                  {(['all', 'incomplete', 'complete'] as FilterMode[]).map((mode) => {
+                    const active = filter === mode;
+                    const label =
+                      mode === 'all'
+                        ? t('practiceFilterAll')
+                        : mode === 'incomplete'
+                          ? t('practiceFilterIncomplete')
+                          : t('practiceFilterComplete');
+                    return (
+                      <Pressable
+                        key={mode}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: active }}
+                        onPress={() => setFilter(mode)}
+                        className={`rounded-full px-3 py-1.5 ${
+                          active ? 'bg-saffron/15 dark:bg-gold/15' : 'bg-gp-bg dark:bg-gp-bg-dark'
+                        }`}>
+                        <AppText
+                          bold
+                          className={`text-xs ${
+                            active
+                              ? 'text-saffron dark:text-gold'
+                              : 'text-gp-muted dark:text-gp-muted-dark'
+                          }`}>
+                          {label}
+                        </AppText>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </SpiritualSurfaceBody>
+            </SpiritualSurface>
+          </View>
+        }
+        ListEmptyComponent={
+          <View className="px-4 py-6">
+            <AppText className="text-sm text-gp-muted dark:text-gp-muted-dark">
+              {practiceOverview.loading ? t('pleaseWait') : t('practiceNoMembers')}
+            </AppText>
+          </View>
+        }
+        contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 20, paddingBottom: 40 }}
+        initialNumToRender={8}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        showsVerticalScrollIndicator={false}
+      />
 
       <Modal
         visible={Boolean(editMember)}

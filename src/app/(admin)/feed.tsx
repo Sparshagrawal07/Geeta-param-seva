@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { View } from 'react-native';
 
 import { GroupFeedList, useGroupFeed, type GroupFeedListHandle } from '@/components/feed/group-feed';
 import { GroupScopeSelector } from '@/components/admin/group-scope-selector';
@@ -18,25 +19,10 @@ export default function AdminFeedScreen() {
 
   return (
     <Screen
-      contentClassName="relative px-5 pb-10 pt-2"
+      scrollable={false}
+      contentClassName="relative px-0 pt-2"
       animateContent={false}
-      scrollProps={{
-        refreshControl: feed.refreshControl,
-        onScrollBeginDrag: () => feedListRef.current?.dismissDeleteMode(),
-      }}>
-      <SectionHeader title={t('feedTitle')} subtitle={t('feedSubtitle')} />
-
-      <SpiritualSurface variant="elevated" className="mb-4">
-        <SpiritualSurfaceBody className="py-4">
-          <GroupScopeSelector
-            groups={groups}
-            selectedGroupId={selectedGroupId}
-            onSelect={(id) => void setSelectedGroupId(id)}
-            hint={groups.length > 1 ? t('feedGroupHint') : undefined}
-          />
-        </SpiritualSurfaceBody>
-      </SpiritualSurface>
-
+      >
       <GroupFeedList
         ref={feedListRef}
         groupId={selectedGroupId}
@@ -48,6 +34,22 @@ export default function AdminFeedScreen() {
         onRefresh={() => void feed.handleRefresh()}
         canDeletePost={feed.canDeletePost}
         confirmDelete={feed.confirmDelete}
+        onScrollBeginDrag={() => feedListRef.current?.dismissDeleteMode()}
+        header={
+          <View className="px-5">
+            <SectionHeader title={t('feedTitle')} subtitle={t('feedSubtitle')} />
+            <SpiritualSurface variant="elevated" className="mb-4">
+              <SpiritualSurfaceBody className="py-4">
+                <GroupScopeSelector
+                  groups={groups}
+                  selectedGroupId={selectedGroupId}
+                  onSelect={(id) => void setSelectedGroupId(id)}
+                  hint={groups.length > 1 ? t('feedGroupHint') : undefined}
+                />
+              </SpiritualSurfaceBody>
+            </SpiritualSurface>
+          </View>
+        }
       />
     </Screen>
   );

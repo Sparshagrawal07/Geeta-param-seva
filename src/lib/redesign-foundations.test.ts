@@ -113,6 +113,8 @@ describe('spiritual asset registry', () => {
     expect(source).toContain("krishnaArtDark:");
     expect(source).toContain("templeHeroLight:");
     expect(source).toContain("templeHeroDark:");
+    expect(source).toContain("templeReflectionLight:");
+    expect(source).toContain("templeReflectionDark:");
 
     const spiritualDir = path.join(ROOT, 'assets/images/spiritual');
     expect(
@@ -135,6 +137,8 @@ describe('spiritual asset registry', () => {
       'nav-lotus-bg-light.png',
       'temple-hero-dark.png',
       'temple-hero-light.png',
+      'temple-reflection-dark.png',
+      'temple-reflection-light.png',
     ]);
     for (const file of readdirSync(spiritualDir)) {
       expect(existsSync(path.join(spiritualDir, file))).toBe(true);

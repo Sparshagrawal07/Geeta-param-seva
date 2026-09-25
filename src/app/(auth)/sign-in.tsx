@@ -117,6 +117,7 @@ export default function SignInScreen() {
                 <View className="mt-6 gap-5">
                   <AppTextField
                     ref={register('phone')}
+                    testID="sign-in-phone"
                     label={t('phoneLabel')}
                     value={phoneDigits}
                     onChangeText={handlePhoneChange}
@@ -132,6 +133,7 @@ export default function SignInScreen() {
 
                   <AppTextField
                     ref={register('pin')}
+                    testID="sign-in-pin"
                     label={t('pinLabel')}
                     value={pin}
                     onChangeText={handlePinChange}
@@ -163,6 +165,7 @@ export default function SignInScreen() {
                     </AppText>
                     <LegalLinks className="justify-center" />
                     <AppButton
+                      testID="sign-in-submit"
                       label={t('signIn')}
                       loading={loading}
                       fullWidth

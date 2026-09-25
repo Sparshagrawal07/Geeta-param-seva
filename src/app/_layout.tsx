@@ -17,6 +17,9 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { ErrorBoundary } from '@/components/ui/error-boundary';
 import { ThemeCrossfade } from '@/components/ui/theme-crossfade';
 import { useAppColors } from '@/hooks/use-app-colors';
+import { useLocalPerformanceSpan } from '@/hooks/use-local-performance-span';
+import { initializeLocalCache } from '@/lib/cache';
+import { startRefreshCoordinator } from '@/lib/cache/refresh-coordinator';
 import { ThemeProvider, useThemeSettings } from '@/providers/theme-provider';
 import { AuthProvider } from '@/providers/auth-provider';
 import { AdsProvider } from '@/providers/ads-provider';
@@ -73,12 +76,31 @@ export default function RootLayout() {
     SplineSans_600SemiBold,
     SplineSans_700Bold,
   });
+  useLocalPerformanceSpan('app.root.ready', fontsLoaded);
 
   useEffect(() => {
     if (fontsLoaded) {
       void SplashScreen.hideAsync();
     }
   }, [fontsLoaded]);
+
+  useEffect(() => {
+    let disposed = false;
+    let stopCoordinator: (() => void) | undefined;
+
+    void initializeLocalCache()
+      .then(() => {
+        if (!disposed) stopCoordinator = startRefreshCoordinator();
+      })
+      .catch((error: unknown) => {
+        if (__DEV__) console.warn('Local cache initialization failed.', error);
+      });
+
+    return () => {
+      disposed = true;
+      stopCoordinator?.();
+    };
+  }, []);
 
   if (!fontsLoaded) {
     return null;

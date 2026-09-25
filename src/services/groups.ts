@@ -5,18 +5,27 @@ import {
   collection,
   deleteDoc,
   doc,
+  documentId,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  startAfter,
   Timestamp,
   updateDoc,
   where,
   type Unsubscribe,
 } from 'firebase/firestore';
 
+import {
+  GROUP_LIST_MAX_DOCS,
+  GROUP_LIST_MAX_PAGES,
+  GROUP_LIST_PAGE_SIZE,
+  normalizeGroupName,
+} from '@/lib/backend-query-policy';
 import { auth, db } from '@/lib/firebase';
 import { getUserProfile, isSeniorAdmin } from '@/lib/users';
 import type { Group } from '@/types/group';
@@ -56,8 +65,26 @@ async function assertSeniorAdminCaller() {
 }
 
 export async function fetchGroups(): Promise<Group[]> {
-  const snapshot = await getDocs(query(collection(db, 'groups'), orderBy('createdAt', 'asc')));
-  return snapshot.docs.map((entry) => mapGroup(entry.id, entry.data() as Record<string, unknown>));
+  const groups: Group[] = [];
+  let cursor: string | undefined;
+
+  for (let page = 0; page < GROUP_LIST_MAX_PAGES; page += 1) {
+    const constraints = [
+      orderBy(documentId(), 'asc'),
+      ...(cursor ? [startAfter(cursor)] : []),
+      limit(GROUP_LIST_PAGE_SIZE),
+    ];
+    const snapshot = await getDocs(query(collection(db, 'groups'), ...constraints));
+    groups.push(
+      ...snapshot.docs.map((entry) =>
+        mapGroup(entry.id, entry.data() as Record<string, unknown>)
+      )
+    );
+    if (snapshot.size < GROUP_LIST_PAGE_SIZE) break;
+    cursor = snapshot.docs[snapshot.docs.length - 1]!.id;
+  }
+
+  return groups.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 }
 
 export async function fetchGroupsByIds(ids: string[]): Promise<Group[]> {
@@ -74,7 +101,11 @@ export async function fetchGroupsByIds(ids: string[]): Promise<Group[]> {
 
 export function subscribeGroups(onChange: (groups: Group[]) => void, onError?: (error: Error) => void): Unsubscribe {
   return onSnapshot(
-    query(collection(db, 'groups'), orderBy('createdAt', 'asc')),
+    query(
+      collection(db, 'groups'),
+      orderBy('createdAt', 'asc'),
+      limit(GROUP_LIST_MAX_DOCS)
+    ),
     (snapshot) => {
       onChange(
         snapshot.docs.map((entry) => mapGroup(entry.id, entry.data() as Record<string, unknown>))
@@ -127,8 +158,10 @@ export async function createGroup(input: {
 }): Promise<Group> {
   await assertSeniorAdminCaller();
 
+  const name = input.name.trim();
   const docRef = await addDoc(collection(db, 'groups'), {
-    name: input.name.trim(),
+    name,
+    nameNormalized: normalizeGroupName(name),
     description: input.description?.trim() ?? '',
     createdBy: input.createdBy,
     createdAt: serverTimestamp(),
@@ -140,7 +173,7 @@ export async function createGroup(input: {
 
   return {
     id: docRef.id,
-    name: input.name.trim(),
+    name,
     description: input.description?.trim(),
     memberCount: 0,
     postCount: 0,
@@ -160,15 +193,19 @@ export async function isGroupNameAvailable(
   name: string,
   excludeGroupId?: string
 ): Promise<boolean> {
-  const normalized = name.trim().toLowerCase();
+  const normalized = normalizeGroupName(name);
   if (!normalized) {
     return false;
   }
 
-  const groups = await fetchGroups();
-  return !groups.some(
-    (group) => group.id !== excludeGroupId && group.name.trim().toLowerCase() === normalized
+  const snapshot = await getDocs(
+    query(
+      collection(db, 'groups'),
+      where('nameNormalized', '==', normalized),
+      limit(excludeGroupId ? 2 : 1)
+    )
   );
+  return !snapshot.docs.some((entry) => entry.id !== excludeGroupId);
 }
 
 export async function updateGroupName(groupId: string, name: string): Promise<Group> {
@@ -182,7 +219,10 @@ export async function updateGroupName(groupId: string, name: string): Promise<Gr
     throw new Error('GROUP_NAME_TAKEN');
   }
 
-  await updateDoc(doc(db, 'groups', groupId), { name: trimmed });
+  await updateDoc(doc(db, 'groups', groupId), {
+    name: trimmed,
+    nameNormalized: normalizeGroupName(trimmed),
+  });
   const snapshot = await getDoc(doc(db, 'groups', groupId));
   if (!snapshot.exists()) {
     throw new Error('Group not found');

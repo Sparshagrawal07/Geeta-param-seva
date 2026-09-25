@@ -1,5 +1,13 @@
-import { forwardRef, useCallback, useImperativeHandle, useState, type ReactNode } from 'react';
-import { RefreshControl, View } from 'react-native';
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useImperativeHandle,
+  useMemo,
+  useState,
+  type ReactElement,
+} from 'react';
+import { FlatList, RefreshControl, View } from 'react-native';
 
 import { AnnouncementPostCard } from '@/components/feed/announcement-post-card';
 import { FeedDeleteOverlay } from '@/components/feed/feed-delete-overlay';
@@ -8,7 +16,6 @@ import { SevaPostCard } from '@/components/feed/seva-post-card';
 import { AppSpinner } from '@/components/ui/app-spinner';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
-import { FadeInView } from '@/components/ui/fade-in-view';
 import { useAuth } from '@/hooks/use-auth';
 import { useFeed } from '@/hooks/use-feed';
 import { isAdminRole } from '@/lib/users';
@@ -111,11 +118,63 @@ interface GroupFeedListProps {
   confirmDelete?: (item: FeedItem, onDismissOverlay: () => void) => void;
   /** When true (default), show Report Content on each post. */
   allowReport?: boolean;
+  header?: ReactElement | null;
+  footer?: ReactElement | null;
+  onScrollBeginDrag?: () => void;
 }
 
 export interface GroupFeedListHandle {
   dismissDeleteMode: () => void;
 }
+
+interface FeedRowProps {
+  item: FeedItem;
+  canDelete: boolean;
+  deleteActive: boolean;
+  reportable: boolean;
+  onShowDelete: (item: FeedItem, position: { x: number; y: number }) => void;
+  onReport: (item: FeedItem) => void;
+}
+
+const FeedRow = memo(function FeedRow({
+  item,
+  canDelete,
+  deleteActive,
+  reportable,
+  onShowDelete,
+  onReport,
+}: FeedRowProps) {
+  const handleShowDelete = useCallback(
+    (position: { x: number; y: number }) => onShowDelete(item, position),
+    [item, onShowDelete]
+  );
+  const handleReport = useCallback(() => onReport(item), [item, onReport]);
+  const actions = {
+    ...(canDelete
+      ? {
+          deletable: true,
+          deleteActive,
+          onShowDelete: handleShowDelete,
+        }
+      : {}),
+    ...(reportable
+      ? {
+          reportable: true,
+          onReport: handleReport,
+        }
+      : {}),
+  };
+
+  return (
+    <View className="px-5">
+      {item.type === 'seva' ? (
+        <SevaPostCard post={item} {...actions} />
+      ) : (
+        <AnnouncementPostCard post={item} {...actions} />
+      )}
+    </View>
+  );
+});
 
 export const GroupFeedList = forwardRef<GroupFeedListHandle, GroupFeedListProps>(function GroupFeedList(
   {
@@ -129,6 +188,9 @@ export const GroupFeedList = forwardRef<GroupFeedListHandle, GroupFeedListProps>
     canDeletePost,
     confirmDelete,
     allowReport = true,
+    header,
+    footer,
+    onScrollBeginDrag,
   },
   ref
 ) {
@@ -144,60 +206,78 @@ export const GroupFeedList = forwardRef<GroupFeedListHandle, GroupFeedListProps>
   useImperativeHandle(ref, () => ({ dismissDeleteMode }), [dismissDeleteMode]);
 
   const activeItem = activeDelete ? items.find((item) => item.id === activeDelete.itemId) : null;
-
-  if (!groupId) {
-    return <EmptyState title={t('noGroupAssigned')} message={t('selectGroup')} />;
-  }
+  const showDelete = useCallback((item: FeedItem, position: { x: number; y: number }) => {
+    setActiveDelete({ itemId: item.id, buttonX: position.x, buttonY: position.y });
+  }, []);
+  const showReport = useCallback((item: FeedItem) => setReportItem(item), []);
+  const keyExtractor = useCallback((item: FeedItem) => item.id, []);
+  const renderItem = useCallback(
+    ({ item }: { item: FeedItem }) => (
+      <FeedRow
+        item={item}
+        canDelete={(canDeletePost?.(item) ?? false) && Boolean(confirmDelete)}
+        deleteActive={activeDelete?.itemId === item.id}
+        reportable={Boolean(allowReport && profile && item.createdBy !== profile.uid)}
+        onShowDelete={showDelete}
+        onReport={showReport}
+      />
+    ),
+    [activeDelete?.itemId, allowReport, canDeletePost, confirmDelete, profile, showDelete, showReport]
+  );
+  const empty = useMemo(() => {
+    if (!groupId) {
+      return (
+        <View className="px-5">
+          <EmptyState title={t('noGroupAssigned')} message={t('selectGroup')} />
+        </View>
+      );
+    }
+    if (loading && !refreshing) {
+      return (
+        <View className="items-center py-6">
+          <AppSpinner size="md" />
+        </View>
+      );
+    }
+    if (error) {
+      return (
+        <View className="px-5">
+          <ErrorState message={error} onRetry={onRefresh} />
+        </View>
+      );
+    }
+    return (
+      <View className="px-5">
+        <EmptyState title={t('feedEmptyTitle')} message={t('feedEmptyMessage')} />
+      </View>
+    );
+  }, [error, groupId, loading, onRefresh, refreshing, t]);
 
   return (
     <>
-      <View className="gap-6">
-        {loading && !refreshing ? (
-          <View className="items-center py-6">
-            <AppSpinner size="md" />
-          </View>
-        ) : null}
-
-        {error ? <ErrorState message={error} onRetry={onRefresh} /> : null}
-
-        {!loading && !error && items.length === 0 ? (
-          <EmptyState title={t('feedEmptyTitle')} message={t('feedEmptyMessage')} />
-        ) : null}
-
-        <View className="gap-4">
-          {items.map((item, index) => {
-            const canDelete = canDeletePost?.(item) ?? false;
-            const deleteProps = canDelete && confirmDelete
-              ? {
-                  deletable: true,
-                  deleteActive: activeDelete?.itemId === item.id,
-                  onShowDelete: (position: { x: number; y: number }) =>
-                    setActiveDelete({ itemId: item.id, buttonX: position.x, buttonY: position.y }),
-                }
-              : {};
-
-            const reportProps =
-              allowReport && profile && item.createdBy !== profile.uid
-                ? {
-                    reportable: true as const,
-                    onReport: () => setReportItem(item),
-                  }
-                : {};
-
-            const wrap = (card: ReactNode) => (
-              <FadeInView key={item.id} index={index} slide>
-                {card}
-              </FadeInView>
-            );
-
-            if (item.type === 'seva') {
-              return wrap(<SevaPostCard post={item} {...deleteProps} {...reportProps} />);
-            }
-
-            return wrap(<AnnouncementPostCard post={item} {...deleteProps} {...reportProps} />);
-          })}
-        </View>
-      </View>
+      <FlatList
+        data={groupId && !error ? items : []}
+        renderItem={renderItem}
+        keyExtractor={keyExtractor}
+        ListHeaderComponent={header}
+        ListEmptyComponent={empty}
+        ListFooterComponent={footer}
+        ItemSeparatorComponent={() => <View className="h-4" />}
+        contentContainerStyle={{ flexGrow: 1, paddingBottom: 40 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        onScrollBeginDrag={() => {
+          dismissDeleteMode();
+          onScrollBeginDrag?.();
+        }}
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={4}
+        maxToRenderPerBatch={6}
+        windowSize={7}
+        removeClippedSubviews={false}
+        showsVerticalScrollIndicator={false}
+      />
 
       <FeedDeleteOverlay
         visible={!!activeDelete}

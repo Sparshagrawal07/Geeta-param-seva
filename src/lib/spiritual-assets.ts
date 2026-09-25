@@ -9,6 +9,7 @@ import { brandPalette } from '@/lib/brand-palette';
  * | File | Slot | Usage |
  * |------|------|-------|
  * | temple-hero-light/dark | heroTemple, authTemple | Home + auth header backdrop |
+ * | temple-reflection-light/dark | heroTempleReflection | Precomposed hero water reflection |
  * | feather-light/dark | verseFeather, authFeather | Card-bridge + auth feather |
  * | lotus-divider-light/dark | lotusDivider | Section / header ornament |
  * | krishna-art-light/dark | verseKrishna | Verse card watermark |
@@ -28,6 +29,8 @@ export const spiritualAssetFiles = {
   krishnaArtDark: require('../../assets/images/spiritual/krishna-art-dark.png'),
   templeHeroLight: require('../../assets/images/spiritual/temple-hero-light.png'),
   templeHeroDark: require('../../assets/images/spiritual/temple-hero-dark.png'),
+  templeReflectionLight: require('../../assets/images/spiritual/temple-reflection-light.png'),
+  templeReflectionDark: require('../../assets/images/spiritual/temple-reflection-dark.png'),
   navLotusBgLight: require('../../assets/images/spiritual/nav-lotus-bg-light.png'),
   navLotusBgDark: require('../../assets/images/spiritual/nav-lotus-bg-dark.png'),
   mandala1: require('../../assets/images/spiritual/mandala-1.png'),
@@ -40,6 +43,7 @@ export const spiritualAssetFiles = {
 export type SpiritualAssetSlot =
   | 'lotusDivider'
   | 'heroTemple'
+  | 'heroTempleReflection'
   | 'verseFeather'
   | 'authTemple'
   | 'authFeather'
@@ -91,6 +95,18 @@ export const spiritualAssetSlots: Record<SpiritualAssetSlot, SpiritualAssetSlotC
     position: 'fill',
     resizeMode: 'cover',
     anchor: 'top',
+    accessibilityHidden: true,
+  },
+  heroTempleReflection: {
+    light: spiritualAssetFiles.templeReflectionLight,
+    dark: spiritualAssetFiles.templeReflectionDark,
+    width: '100%',
+    height: '100%',
+    opacity: { light: 1, dark: 1 },
+    position: 'fill',
+    resizeMode: 'cover',
+    anchor: 'top',
+    coverScale: 1,
     accessibilityHidden: true,
   },
   /** Peacock feather bridging hero bottom → verse card top (see HomeHeroSection). */
@@ -378,6 +394,8 @@ export const NAV_LOTUS_EXPORT_SIZE = { width: 1200, height: 200 } as const;
 export const SPIRITUAL_ASSET_FILENAMES = [
   'temple-hero-light.png',
   'temple-hero-dark.png',
+  'temple-reflection-light.png',
+  'temple-reflection-dark.png',
   'feather-light.png',
   'feather-dark.png',
   'lotus-divider-light.png',

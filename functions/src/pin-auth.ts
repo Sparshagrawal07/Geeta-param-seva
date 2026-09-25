@@ -9,7 +9,7 @@ import { getAccessRoster } from './roster';
 
 const PIN_MIN_LENGTH = 4;
 const PIN_MAX_LENGTH = 8;
-const JOIN_PIN_TTL_MS = 24 * 60 * 60 * 1000;
+const JOIN_PIN_TTL_MS = 72 * 60 * 60 * 1000;
 
 export function normalizePin(pin: unknown): string {
   if (typeof pin !== 'string') {

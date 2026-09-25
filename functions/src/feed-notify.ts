@@ -1,7 +1,6 @@
 /**
  * Instant in-app + push notification when seva / announcement is published.
- * Invoked via callable after the client writes the post, and also by the
- * Firestore `onPostCreated` trigger as a reliability backstop.
+ * Invoked only by the Firestore post-create trigger.
  */
 import { createAndPushGroupNotification } from './push';
 

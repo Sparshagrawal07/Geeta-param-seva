@@ -1,4 +1,5 @@
-import { Image, View } from 'react-native';
+import { Image } from 'expo-image';
+import { View } from 'react-native';
 
 import { FeedPostContainer } from '@/components/feed/feed-post-container';
 import { SevaBannerView } from '@/components/seva/seva-banner-view';
@@ -39,7 +40,15 @@ export function SevaPostCard({
         {post.banner ? (
           <SevaBannerView banner={post.banner} />
         ) : post.imageUrl ? (
-          <Image source={{ uri: post.imageUrl }} style={{ width: '100%', height: 220 }} resizeMode="cover" />
+          <Image
+            source={{ uri: post.imageUrl }}
+            style={{ width: '100%', height: 220, backgroundColor: '#E9DED3' }}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            transition={180}
+            placeholder={{ blurhash: 'L6PZfSi_.AyE_3t7t7R**0o#DgR4' }}
+            accessibilityLabel={post.title}
+          />
         ) : null}
 
         <View className="gap-2 p-4">

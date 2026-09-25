@@ -20,19 +20,47 @@ interface SafeBannerAdProps {
  */
 export function SafeBannerAd({ screen, slot = 1, className = '' }: SafeBannerAdProps) {
   const { t } = useLocale();
-  const { canShow, unitIdFor, native } = useAds();
+  const {
+    canShow,
+    unitIdFor,
+    native,
+    ready,
+    config,
+    isAdmin,
+    nativeResolved,
+    sdkResolved,
+  } = useAds();
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
-  if (!canShow(screen, slot) || failed || !native) {
+  const unitId = unitIdFor(slot);
+  const screenEnabled =
+    screen === 'home'
+      ? config.showHome && (slot === 1 || config.maxHome >= 2)
+      : screen === 'seva'
+        ? config.showSeva && slot === 1
+        : config.showProfile && slot === 1;
+  const reservePlacement =
+    ready &&
+    config.enabled &&
+    screenEnabled &&
+    (!isAdmin || config.showAdmins) &&
+    Boolean(unitId);
+
+  if (
+    !reservePlacement ||
+    failed ||
+    (nativeResolved && !native) ||
+    (sdkResolved && !canShow(screen, slot))
+  ) {
     return null;
   }
 
-  const unitId = unitIdFor(slot);
   if (!unitId) return null;
 
-  const BannerAd = native.BannerAd;
-  const size = native.BannerAdSize.BANNER || native.BannerAdSize.ANCHORED_ADAPTIVE_BANNER;
+  const BannerAd = native?.BannerAd;
+  const size = native?.BannerAdSize.BANNER || native?.BannerAdSize.ANCHORED_ADAPTIVE_BANNER;
+  const showBanner = Boolean(BannerAd && size && canShow(screen, slot));
 
   return (
     <View
@@ -45,17 +73,19 @@ export function SafeBannerAd({ screen, slot = 1, className = '' }: SafeBannerAdP
       </AppText>
       <View
         className="items-center justify-center overflow-hidden rounded-xl"
-        style={{ minHeight: loaded ? undefined : 50 }}
+        style={{ minHeight: 50 }}
         collapsable={false}>
-        <BannerAd
-          unitId={unitId}
-          size={size}
-          requestOptions={{
-            requestNonPersonalizedAdsOnly: true,
-          }}
-          onAdLoaded={() => setLoaded(true)}
-          onAdFailedToLoad={() => setFailed(true)}
-        />
+        {showBanner && BannerAd && size ? (
+          <BannerAd
+            unitId={unitId}
+            size={size}
+            requestOptions={{
+              requestNonPersonalizedAdsOnly: true,
+            }}
+            onAdLoaded={() => setLoaded(true)}
+            onAdFailedToLoad={() => setFailed(true)}
+          />
+        ) : null}
         {!loaded && Platform.OS !== 'web' ? (
           <View pointerEvents="none" className="absolute inset-0 items-center justify-center">
             <AppText className="text-xs text-gp-muted dark:text-gp-muted-dark">{t('adLoading')}</AppText>

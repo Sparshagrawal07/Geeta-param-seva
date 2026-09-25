@@ -75,9 +75,12 @@ async function safeGetDocs(label: string, q: ReturnType<typeof query>) {
 export async function fetchNotifications(groupId?: string | null): Promise<AppNotification[]> {
   const uid = auth.currentUser?.uid ?? null;
   const byId = new Map<string, AppNotification>();
+  let attemptedQueries = 0;
+  let successfulQueries = 0;
 
   // Primary path: group-scoped list (works with deployed groupId+createdAt index).
   if (groupId) {
+    attemptedQueries += 1;
     const groupSnap = await safeGetDocs(
       'group',
       query(
@@ -88,6 +91,7 @@ export async function fetchNotifications(groupId?: string | null): Promise<AppNo
       )
     );
     if (groupSnap) {
+      successfulQueries += 1;
       for (const entry of groupSnap.docs) {
         const raw = entry.data() as Record<string, unknown>;
         if (!isVisibleNotification(raw, uid)) continue;
@@ -98,6 +102,7 @@ export async function fetchNotifications(groupId?: string | null): Promise<AppNo
 
   // Optional personal rows (practice reminders). Never fail the whole screen if this errors.
   if (uid) {
+    attemptedQueries += 1;
     const personalSnap = await safeGetDocs(
       'personal',
       query(
@@ -108,6 +113,7 @@ export async function fetchNotifications(groupId?: string | null): Promise<AppNo
       )
     );
     if (personalSnap) {
+      successfulQueries += 1;
       for (const entry of personalSnap.docs) {
         const raw = entry.data() as Record<string, unknown>;
         if (!isVisibleNotification(raw, uid)) continue;
@@ -116,7 +122,10 @@ export async function fetchNotifications(groupId?: string | null): Promise<AppNo
     }
   }
 
-  // If both paths returned nothing usable and we expected data, still return empty (not throw).
+  if (attemptedQueries > 0 && successfulQueries === 0) {
+    throw new Error('Notifications are temporarily unavailable.');
+  }
+
   return [...byId.values()]
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
     .slice(0, NOTIFICATIONS_PAGE_SIZE);

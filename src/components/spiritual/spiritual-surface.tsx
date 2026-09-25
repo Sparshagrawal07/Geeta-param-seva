@@ -22,7 +22,7 @@ interface SpiritualSurfaceProps extends ViewProps {
   mandalaOpacity?: number;
 }
 
-function useSurfaceColors(variant: SurfaceVariant, isDark: boolean) {
+function getSurfaceColors(variant: SurfaceVariant, isDark: boolean) {
   switch (variant) {
     case 'elevated':
       return isDark ? spiritualDesignTokens.elevated.dark : spiritualDesignTokens.elevated.light;
@@ -72,7 +72,7 @@ export function SpiritualSurface({
     );
   }
 
-  const bg = useSurfaceColors(variant, isDark);
+  const bg = getSurfaceColors(variant, isDark);
   return (
     <View
       className={`relative overflow-hidden rounded-2xl ${borderClass} ${className ?? ''}`}

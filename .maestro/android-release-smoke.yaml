@@ -1,0 +1,55 @@
+appId: com.geetaparamseva.app
+name: Android release cached navigation smoke
+tags:
+  - smoke
+  - android
+  - release
+---
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: sign-in-phone
+- tapOn:
+    id: sign-in-phone
+- inputText: ${USER_PHONE_DIGITS}
+- tapOn:
+    id: sign-in-pin
+- inputText: ${USER_GROUP_PIN}
+- hideKeyboard
+- tapOn:
+    id: sign-in-submit
+- extendedWaitUntil:
+    visible:
+      id: screen-home
+    timeout: 30000
+
+# Prime each surface while online.
+- tapOn:
+    id: tab-seva
+- assertVisible:
+    id: screen-seva
+- tapOn:
+    id: tab-home
+- assertVisible:
+    id: screen-home
+- tapOn:
+    id: open-gita
+- assertVisible:
+    id: screen-gita
+- back
+
+# Android-only offline check; state/cache must remain alive.
+- setAirplaneMode: enabled
+- tapOn:
+    id: tab-seva
+- assertVisible:
+    id: screen-seva
+- tapOn:
+    id: tab-home
+- assertVisible:
+    id: screen-home
+- tapOn:
+    id: open-gita
+- assertVisible:
+    id: screen-gita
+- setAirplaneMode: disabled

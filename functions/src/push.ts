@@ -386,8 +386,8 @@ export async function createAndPushGroupNotification(input: {
   data?: Record<string, unknown>;
   screen?: string;
   /**
-   * When set (e.g. `post_{postId}`), create-or-skip so callable + Firestore
-   * trigger can both invoke without double-pushing members.
+   * When set (e.g. `post_{postId}`), create-or-skip so at-least-once
+   * Firestore trigger delivery cannot double-push members.
    */
   idempotencyKey?: string;
 }) {

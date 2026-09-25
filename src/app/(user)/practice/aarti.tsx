@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from 'react';
 import { View } from 'react-native';
 
 import { Screen } from '@/components/layout/screen';
@@ -7,31 +6,17 @@ import { SpiritualSurface, SpiritualSurfaceBody } from '@/components/spiritual/s
 import { LotusDivider } from '@/components/verse/lotus-divider';
 import { AppText } from '@/components/ui/app-text';
 import { FadeInView } from '@/components/ui/fade-in-view';
+import { useTodaysPractice } from '@/hooks/use-todays-practice';
 import { AARTI_CONTENT } from '@/lib/aarti-content';
 import { AARTI_ITEM_KEY } from '@/lib/practice';
 import { useLocale } from '@/providers/locale-provider';
-import { getMyPracticeTodayRemote } from '@/services/practice';
 
 export default function AartiPracticeScreen() {
   const { t, locale } = useLocale();
-  const [completed, setCompleted] = useState(false);
-  const [inTodaysPractice, setInTodaysPractice] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const today = await getMyPracticeTodayRemote();
-      const aarti = today.items.find((item) => item.itemKey === AARTI_ITEM_KEY);
-      setInTodaysPractice(Boolean(aarti));
-      setCompleted(Boolean(aarti?.completed));
-    } catch {
-      setInTodaysPractice(false);
-      setCompleted(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const practice = useTodaysPractice();
+  const aarti = practice.items.find((item) => item.itemKey === AARTI_ITEM_KEY);
+  const inTodaysPractice = Boolean(aarti);
+  const completed = Boolean(aarti?.completed);
 
   const title = locale === 'hi' ? AARTI_CONTENT.titleHi : AARTI_CONTENT.titleEn;
   const body = locale === 'hi' ? AARTI_CONTENT.bodyHi : AARTI_CONTENT.bodyEn;

@@ -238,6 +238,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatus | null>(null);
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabledState] = useState(true);
+  const [startupTasksReady, setStartupTasksReady] = useState(false);
   const deviceIdRef = useRef<string | null>(null);
   const registeringRef = useRef(false);
   const permissionPromptRef = useRef(false);
@@ -410,12 +411,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
 
     const task = InteractionManager.runAfterInteractions(() => {
       delayTimer = setTimeout(() => {
-        void (async () => {
-          if (cancelled) return;
-          if (AppState.currentState !== 'active') return;
-          deviceIdRef.current = await getStableDeviceId();
-          await promptForPermissionsIfNeeded();
-        })();
+        if (!cancelled) setStartupTasksReady(true);
       }, 900);
     });
 
@@ -424,20 +420,33 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       task.cancel?.();
       if (delayTimer) clearTimeout(delayTimer);
     };
-  }, [promptForPermissionsIfNeeded]);
+  }, []);
 
   useEffect(() => {
-    if (!Notifications || authLoading || !profile?.uid) return;
+    if (
+      !Notifications ||
+      !startupTasksReady ||
+      AppState.currentState !== 'active' ||
+      authLoading ||
+      !profile?.uid
+    ) return;
     void (async () => {
+      deviceIdRef.current = await getStableDeviceId();
       await promptForPermissionsIfNeeded();
       await registerPushToken();
     })();
-  }, [authLoading, profile?.uid, promptForPermissionsIfNeeded, registerPushToken]);
+  }, [
+    authLoading,
+    profile?.uid,
+    promptForPermissionsIfNeeded,
+    registerPushToken,
+    startupTasksReady,
+  ]);
 
   useEffect(() => {
     if (!Notifications) return;
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') return;
+      if (state !== 'active' || !startupTasksReady) return;
       void (async () => {
         await promptForPermissionsIfNeeded();
         if (profile?.uid) {
@@ -446,7 +455,7 @@ export function NotificationProvider({ children }: PropsWithChildren) {
       })();
     });
     return () => subscription.remove();
-  }, [profile?.uid, promptForPermissionsIfNeeded, registerPushToken]);
+  }, [profile?.uid, promptForPermissionsIfNeeded, registerPushToken, startupTasksReady]);
 
   useEffect(() => {
     if (!Notifications) return;

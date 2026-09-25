@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { memo, useCallback, useEffect, useState } from 'react';
+import { FlatList, Pressable, View } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 
 import { Screen } from '@/components/layout/screen';
@@ -9,7 +9,6 @@ import { LotusDivider } from '@/components/verse/lotus-divider';
 import { AppText } from '@/components/ui/app-text';
 import { AppSpinner } from '@/components/ui/app-spinner';
 import { ErrorState } from '@/components/ui/error-state';
-import { FadeInView } from '@/components/ui/fade-in-view';
 import { useLocale } from '@/providers/locale-provider';
 import {
   fetchGitaChapter,
@@ -17,6 +16,48 @@ import {
   resolveGitaVerseContent,
 } from '@/services/gita-scripture';
 import type { GitaChapter, GitaVerse } from '@/types/gita-scripture';
+
+const VerseRow = memo(function VerseRow({
+  verse,
+  chapterNumber,
+  locale,
+  readLabel,
+}: {
+  verse: GitaVerse;
+  chapterNumber: number;
+  locale: string;
+  readLabel: string;
+}) {
+  const content = resolveGitaVerseContent(verse, locale);
+  const openVerse = useCallback(() => {
+    router.push(`/(user)/gita/verse/${chapterNumber}/${verse.verseNumber}` as never);
+  }, [chapterNumber, verse.verseNumber]);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${content.reference}. ${readLabel}`}
+      onPress={openVerse}>
+      <SpiritualSurface variant="elevated" withMandala mandalaKind="gold">
+        <SpiritualSurfaceBody className="py-4">
+          <AppText bold className="text-xs uppercase tracking-widest text-saffron dark:text-gold">
+            {content.reference}
+          </AppText>
+          <AppText
+            className="mt-2 text-base leading-7 text-gp-text dark:text-gp-text-dark"
+            numberOfLines={3}
+            style={locale === 'hi' ? { fontFamily: 'NotoSansDevanagari_400Regular' } : undefined}>
+            {content.verseText}
+          </AppText>
+          <AppText className="mt-2 text-xs text-saffron dark:text-gold">{readLabel} →</AppText>
+        </SpiritualSurfaceBody>
+      </SpiritualSurface>
+    </Pressable>
+  );
+});
+
+const verseKeyExtractor = (verse: GitaVerse) => verse.id;
+const VerseSeparator = () => <View className="h-3" />;
 
 export default function GitaChapterScreen() {
   const { chapterNumber: chapterParam } = useLocalSearchParams<{ chapterNumber: string }>();
@@ -59,6 +100,19 @@ export default function GitaChapterScreen() {
     void load();
   }, [load]);
 
+  const readLabel = t('gitaReadVerse');
+  const renderVerse = useCallback(
+    ({ item }: { item: GitaVerse }) => (
+      <VerseRow
+        verse={item}
+        chapterNumber={chapterNumber}
+        locale={locale}
+        readLabel={readLabel}
+      />
+    ),
+    [chapterNumber, locale, readLabel]
+  );
+
   if (loading) {
     return (
       <Screen showBack title={t('gitaExploreTitle')} animateContent={false}>
@@ -85,45 +139,31 @@ export default function GitaChapterScreen() {
       showBack
       title={`${t('gitaChapterWord')} ${chapter.chapterNumber}`}
       subtitle={title}
-      contentClassName="relative px-5 pb-10"
+      scrollable={false}
+      contentClassName="relative px-0"
       animateContent={false}>
       <MandalaGoldBackdrop />
-
-      {summary ? (
-        <FadeInView slide>
-          <AppText className="text-base leading-7 text-gp-muted dark:text-gp-muted-dark">{summary}</AppText>
-          <LotusDivider className="my-5" />
-        </FadeInView>
-      ) : null}
-
-      <View className="gap-3">
-        {verses.map((verse, index) => {
-          const content = resolveGitaVerseContent(verse, locale);
-          return (
-            <FadeInView key={verse.id} index={index} slide>
-              <Pressable
-                onPress={() =>
-                  router.push(`/(user)/gita/verse/${chapter.chapterNumber}/${verse.verseNumber}` as never)
-                }>
-                <SpiritualSurface variant="elevated" withMandala mandalaKind="gold">
-                  <SpiritualSurfaceBody className="py-4">
-                    <AppText bold className="text-xs uppercase tracking-widest text-saffron dark:text-gold">
-                      {content.reference}
-                    </AppText>
-                    <AppText
-                      className="mt-2 text-base leading-7 text-gp-text dark:text-gp-text-dark"
-                      numberOfLines={3}
-                      style={locale === 'hi' ? { fontFamily: 'NotoSansDevanagari_400Regular' } : undefined}>
-                      {content.verseText}
-                    </AppText>
-                    <AppText className="mt-2 text-xs text-saffron dark:text-gold">{t('gitaReadVerse')} →</AppText>
-                  </SpiritualSurfaceBody>
-                </SpiritualSurface>
-              </Pressable>
-            </FadeInView>
-          );
-        })}
-      </View>
+      <FlatList
+        data={verses}
+        keyExtractor={verseKeyExtractor}
+        renderItem={renderVerse}
+        ListHeaderComponent={
+          summary ? (
+            <View>
+              <AppText className="text-base leading-7 text-gp-muted dark:text-gp-muted-dark">
+                {summary}
+              </AppText>
+              <LotusDivider className="my-5" />
+            </View>
+          ) : null
+        }
+        ItemSeparatorComponent={VerseSeparator}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+        initialNumToRender={6}
+        maxToRenderPerBatch={8}
+        windowSize={7}
+        showsVerticalScrollIndicator={false}
+      />
     </Screen>
   );
 }

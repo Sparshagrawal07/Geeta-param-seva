@@ -1,28 +1,25 @@
 import { Tabs } from 'expo-router';
+import { Platform } from 'react-native';
 
 import { DevotionalTabIcon } from '@/components/navigation/devotional-tab-icon';
 import { useSpiritualTabBarScreenOptions } from '@/components/navigation/spiritual-tab-bar';
 import { useSevaTabBadge } from '@/hooks/use-seva-tab-badge';
+import { getTabLifecycleOptions } from '@/lib/platform-performance-policy';
 import { useLocale } from '@/providers/locale-provider';
 
 /** Android / default: keep the existing solid spiritual tab bar. */
 export default function UserTabsLayout() {
   const { t } = useLocale();
-  const { hasUnread, refresh, clearBadge } = useSevaTabBadge();
+  const { hasUnread, clearBadge } = useSevaTabBadge();
   const tabBarOptions = useSpiritualTabBarScreenOptions();
 
   return (
-    <Tabs
-      screenOptions={tabBarOptions}
-      screenListeners={{
-        focus: () => {
-          void refresh();
-        },
-      }}>
+    <Tabs screenOptions={{ ...tabBarOptions, ...getTabLifecycleOptions(Platform.OS) }}>
       <Tabs.Screen
         name="index"
         options={{
           title: t('tabHome'),
+          tabBarButtonTestID: 'tab-home',
           tabBarIcon: ({ color, size, focused }) => (
             <DevotionalTabIcon name="home-outline" focusedName="home" color={color} size={size} focused={focused} />
           ),
@@ -37,6 +34,7 @@ export default function UserTabsLayout() {
         }}
         options={{
           title: t('tabSeva'),
+          tabBarButtonTestID: 'tab-seva',
           tabBarBadge: hasUnread ? '' : undefined,
           tabBarBadgeStyle: {
             backgroundColor: '#C45C26',
@@ -54,6 +52,7 @@ export default function UserTabsLayout() {
         name="profile"
         options={{
           title: t('tabProfile'),
+          tabBarButtonTestID: 'tab-profile',
           tabBarIcon: ({ color, size, focused }) => (
             <DevotionalTabIcon name="person-outline" focusedName="person" color={color} size={size} focused={focused} />
           ),

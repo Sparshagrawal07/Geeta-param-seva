@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { View } from 'react-native';
 import { useFocusEffect } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -20,11 +20,10 @@ import { HomeHeroSection } from '@/components/verse/home-hero-section';
 import { useAdminStats } from '@/hooks/use-admin-stats';
 import { useAuth } from '@/hooks/use-auth';
 import { useGroups } from '@/hooks/use-groups';
+import { usePracticeAdminOverview } from '@/hooks/use-practice-admin-overview';
 import { useSelectedGroup } from '@/hooks/use-selected-group';
 import { isSeniorAdmin } from '@/lib/users';
 import { useLocale } from '@/providers/locale-provider';
-import { getPracticeAdminOverviewRemote } from '@/services/practice';
-import type { PracticeAdminOverview } from '@/lib/practice';
 import type { MessageKey } from '@/lib/i18n/messages';
 
 const SECTION_GAP = 28;
@@ -47,25 +46,12 @@ export default function AdminDashboardScreen() {
 
   const scopeId = isSenior ? (selectedGroupId ?? null) : selectedGroupId;
   const { stats, loading, error, refresh } = useAdminStats(scopeId);
-  const [practiceOverview, setPracticeOverview] = useState<PracticeAdminOverview | null>(null);
-
-  const loadPracticeOverview = useCallback(async () => {
-    if (!selectedGroupId) {
-      setPracticeOverview(null);
-      return;
-    }
-    try {
-      setPracticeOverview(await getPracticeAdminOverviewRemote(selectedGroupId));
-    } catch {
-      setPracticeOverview(null);
-    }
-  }, [selectedGroupId]);
+  const { overview: practiceOverview } = usePracticeAdminOverview(selectedGroupId);
 
   useFocusEffect(
     useCallback(() => {
       void refresh({ silent: true });
-      void loadPracticeOverview();
-    }, [refresh, loadPracticeOverview])
+    }, [refresh])
   );
 
   const seniorActions: QuickAction[] = [

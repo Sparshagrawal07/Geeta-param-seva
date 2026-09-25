@@ -15,6 +15,7 @@ export function GitaExploreEntry() {
 
   return (
     <AppPressable
+      testID="open-gita"
       accessibilityRole="button"
       onPress={() => {
         router.push('/(user)/gita' as never);

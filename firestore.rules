@@ -120,8 +120,18 @@ service cloud.firestore {
 
     match /groups/{groupId} {
       allow read: if canReadGroup(groupId);
-      allow create, delete: if isSeniorAdmin();
-      allow update: if isSeniorAdmin()
+      // nameNormalized backs the indexed availability lookup. Counter-only
+      // updates remain compatible with legacy groups until the one-time backfill.
+      allow create: if isSeniorAdmin()
+        && request.resource.data.nameNormalized is string;
+      allow delete: if isSeniorAdmin();
+      allow update: if (
+          isSeniorAdmin()
+          && (
+            request.resource.data.name == resource.data.name
+            || request.resource.data.nameNormalized is string
+          )
+        )
         || (
           canManageGroup(groupId)
           && request.resource.data.diff(resource.data).affectedKeys()

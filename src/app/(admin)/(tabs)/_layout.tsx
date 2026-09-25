@@ -1,7 +1,9 @@
 import { Tabs } from 'expo-router';
+import { Platform } from 'react-native';
 
 import { DevotionalTabIcon } from '@/components/navigation/devotional-tab-icon';
 import { useSpiritualTabBarScreenOptions } from '@/components/navigation/spiritual-tab-bar';
+import { getTabLifecycleOptions } from '@/lib/platform-performance-policy';
 import { useLocale } from '@/providers/locale-provider';
 
 /** Android / default: keep the existing solid spiritual tab bar. */
@@ -10,7 +12,7 @@ export default function AdminTabsLayout() {
   const tabBarOptions = useSpiritualTabBarScreenOptions();
 
   return (
-    <Tabs screenOptions={tabBarOptions}>
+    <Tabs screenOptions={{ ...tabBarOptions, ...getTabLifecycleOptions(Platform.OS) }}>
       <Tabs.Screen
         name="index"
         options={{

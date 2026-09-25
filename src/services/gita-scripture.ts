@@ -1,90 +1,103 @@
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  orderBy,
-  query,
-  where,
-} from 'firebase/firestore';
-
-import { db } from '@/lib/firebase';
+import bundledContent from '@/generated/gita-content.json';
 import {
   formatGitaReference,
-  gitaVerseDocId,
   type GitaChapter,
   type GitaVerse,
 } from '@/types/gita-scripture';
 
-function mapChapter(id: string, data: Record<string, unknown>): GitaChapter {
+type BundledChapter = [
+  id: string,
+  chapterNumber: number,
+  titleEn: string,
+  titleHi: string,
+  nameMeaning: string,
+  verseCount: number,
+  summaryEn: string,
+  summaryHi: string,
+];
+
+type BundledVerse = [
+  id: string,
+  chapterNumber: number,
+  verseNumber: number,
+  verseText: string,
+  transliteration: string,
+  meaningEn: string,
+  meaningHi: string,
+];
+
+type BundledGitaContent = {
+  schemaVersion: number;
+  contentVersion: string;
+  chapters: BundledChapter[];
+  verses: BundledVerse[];
+};
+
+const content = bundledContent as unknown as BundledGitaContent;
+
+function mapChapter(data: BundledChapter): GitaChapter {
   return {
-    id,
-    chapterNumber: Number(data.chapterNumber ?? id),
-    titleEn: String(data.titleEn ?? ''),
-    titleHi: String(data.titleHi ?? ''),
-    nameMeaning: String(data.nameMeaning ?? ''),
-    verseCount: Number(data.verseCount ?? 0),
-    summaryEn: String(data.summaryEn ?? ''),
-    summaryHi: String(data.summaryHi ?? ''),
+    id: data[0],
+    chapterNumber: data[1],
+    titleEn: data[2],
+    titleHi: data[3],
+    nameMeaning: data[4],
+    verseCount: data[5],
+    summaryEn: data[6],
+    summaryHi: data[7],
   };
 }
 
-function mapVerse(id: string, data: Record<string, unknown>): GitaVerse {
-  const chapterNumber = Number(data.chapterNumber ?? 0);
-  const verseNumber = Number(data.verseNumber ?? 0);
+function mapVerse(data: BundledVerse): GitaVerse {
+  const chapterNumber = data[1];
+  const verseNumber = data[2];
   return {
-    id,
+    id: data[0],
     chapterNumber,
     verseNumber,
-    reference: String(data.reference ?? formatGitaReference(chapterNumber, verseNumber, 'en')),
-    referenceHi: String(data.referenceHi ?? formatGitaReference(chapterNumber, verseNumber, 'hi')),
-    verseText: String(data.verseText ?? ''),
-    transliteration: String(data.transliteration ?? ''),
-    meaningEn: String(data.meaningEn ?? ''),
-    meaningHi: String(data.meaningHi ?? ''),
+    reference: formatGitaReference(chapterNumber, verseNumber, 'en'),
+    referenceHi: formatGitaReference(chapterNumber, verseNumber, 'hi'),
+    verseText: data[3],
+    transliteration: data[4],
+    meaningEn: data[5],
+    meaningHi: data[6],
   };
 }
 
-let chaptersCache: GitaChapter[] | null = null;
+export const GITA_CONTENT_VERSION = content.contentVersion;
+
+const chaptersCache = content.chapters.map(mapChapter);
+const chapterByNumberCache = new Map(
+  chaptersCache.map((chapter) => [chapter.chapterNumber, chapter] as const)
+);
 const versesByChapterCache = new Map<number, GitaVerse[]>();
+const verseByCoordinatesCache = new Map<string, GitaVerse>();
+
+for (const bundledVerse of content.verses) {
+  const verse = mapVerse(bundledVerse);
+  const chapterVerses = versesByChapterCache.get(verse.chapterNumber) ?? [];
+  chapterVerses.push(verse);
+  versesByChapterCache.set(verse.chapterNumber, chapterVerses);
+  verseByCoordinatesCache.set(`${verse.chapterNumber}:${verse.verseNumber}`, verse);
+}
 
 export async function fetchGitaChapters(): Promise<GitaChapter[]> {
-  if (chaptersCache) return chaptersCache;
-  const snap = await getDocs(query(collection(db, 'gita_chapters'), orderBy('chapterNumber', 'asc')));
-  chaptersCache = snap.docs.map((entry) => mapChapter(entry.id, entry.data() as Record<string, unknown>));
   return chaptersCache;
 }
 
 export async function fetchGitaChapter(chapterNumber: number): Promise<GitaChapter | null> {
-  const cached = chaptersCache?.find((c) => c.chapterNumber === chapterNumber);
-  if (cached) return cached;
-  const snap = await getDoc(doc(db, 'gita_chapters', String(chapterNumber)));
-  if (!snap.exists()) return null;
-  return mapChapter(snap.id, snap.data() as Record<string, unknown>);
+  return chapterByNumberCache.get(chapterNumber) ?? null;
 }
 
 export async function fetchGitaVersesForChapter(chapterNumber: number): Promise<GitaVerse[]> {
-  const cached = versesByChapterCache.get(chapterNumber);
-  if (cached) return cached;
-  const snap = await getDocs(
-    query(
-      collection(db, 'gita_verses'),
-      where('chapterNumber', '==', chapterNumber),
-      orderBy('verseNumber', 'asc')
-    )
-  );
-  const verses = snap.docs.map((entry) => mapVerse(entry.id, entry.data() as Record<string, unknown>));
-  versesByChapterCache.set(chapterNumber, verses);
-  return verses;
+  return versesByChapterCache.get(chapterNumber) ?? [];
 }
 
 export async function fetchGitaVerse(
   chapterNumber: number,
   verseNumber: number
 ): Promise<GitaVerse | null> {
-  const snap = await getDoc(doc(db, 'gita_verses', gitaVerseDocId(chapterNumber, verseNumber)));
-  if (!snap.exists()) return null;
-  return mapVerse(snap.id, snap.data() as Record<string, unknown>);
+  return verseByCoordinatesCache.get(`${chapterNumber}:${verseNumber}`) ?? null;
 }
 
 export function resolveGitaVerseContent(verse: GitaVerse, locale: string) {

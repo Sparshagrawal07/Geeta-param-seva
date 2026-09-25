@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { memo, useCallback, useEffect, useState } from 'react';
+import { FlatList, Pressable, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { GroupScopeSelector } from '@/components/admin/group-scope-selector';
@@ -40,6 +40,67 @@ type StatusFilter = 'all' | RosterStatus;
 function roleBadgeText(role: RosterRole, t: (key: MessageKey) => string): string {
   return role === 'admin' ? t('roleAdmin') : t('roleMember');
 }
+
+const MemberRow = memo(function MemberRow({
+  entry,
+  groupLabel,
+  roleLabel,
+  inactiveLabel,
+  saffron,
+  onPress,
+}: {
+  entry: AccessRosterEntry;
+  groupLabel: string;
+  roleLabel: string;
+  inactiveLabel: string;
+  saffron: string;
+  onPress: (entry: AccessRosterEntry) => void;
+}) {
+  const handlePress = useCallback(() => onPress(entry), [entry, onPress]);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${entry.name}, ${roleLabel}, ${groupLabel}`}
+      onPress={handlePress}>
+      <SpiritualSurface variant="elevated">
+        <SpiritualSurfaceBody className="gap-1 py-3.5">
+          <View className="flex-row items-center gap-3">
+            <View className="h-10 w-10 items-center justify-center rounded-full bg-saffron/12 dark:bg-gold/15">
+              <Ionicons
+                name={entry.role === 'admin' ? 'shield-outline' : 'person-outline'}
+                size={18}
+                color={saffron}
+              />
+            </View>
+            <View className="min-w-0 flex-1">
+              <AppText bold className="text-base text-gp-text dark:text-gp-text-dark">
+                {entry.name}
+              </AppText>
+              <AppText className="text-sm text-gp-muted dark:text-gp-muted-dark">
+                {entry.phoneNumber}
+              </AppText>
+            </View>
+          </View>
+          <View className="mt-1 flex-row flex-wrap items-center gap-2 pl-[52px]">
+            <View className="rounded-full bg-saffron/10 px-2.5 py-1 dark:bg-gold/15">
+              <AppText bold className="text-xs text-saffron dark:text-gold">
+                {roleLabel}
+                {entry.status === 'inactive' ? ` · ${inactiveLabel}` : ''}
+              </AppText>
+            </View>
+            <AppText className="text-xs text-gp-muted dark:text-gp-muted-dark">
+              {groupLabel}
+            </AppText>
+          </View>
+        </SpiritualSurfaceBody>
+      </SpiritualSurface>
+    </Pressable>
+  );
+});
+
+const memberKeyExtractor = (entry: AccessRosterEntry) => entry.id;
+const MemberSeparator = () => <View className="h-2" />;
 
 export default function AdminMembersScreen() {
   const { t } = useLocale();
@@ -102,14 +163,14 @@ export default function AdminMembersScreen() {
     setSheetOpen(true);
   };
 
-  const openEdit = (entry: AccessRosterEntry) => {
+  const openEdit = useCallback((entry: AccessRosterEntry) => {
     void triggerHaptic('selection');
     setEditing(entry);
     setPrefill(null);
     setAddingFromApplication(false);
     setSheetMode(entry.role === 'admin' ? 'admin' : 'member');
     setSheetOpen(true);
-  };
+  }, []);
 
   const openApproveAndAdd = (application: JoinApplication) => {
     void triggerHaptic('light');
@@ -135,7 +196,7 @@ export default function AdminMembersScreen() {
     }
   };
 
-  const groupLabel = (entry: AccessRosterEntry) => {
+  const groupLabel = useCallback((entry: AccessRosterEntry) => {
     if (entry.role === 'admin') {
       const names = (entry.assignedGroupIds ?? [])
         .map((id) => groups.find((group) => group.id === id)?.name ?? id)
@@ -144,11 +205,31 @@ export default function AdminMembersScreen() {
     }
     if (!entry.groupId) return t('noGroupAssigned');
     return groups.find((group) => group.id === entry.groupId)?.name ?? entry.groupId;
-  };
+  }, [groups, t]);
+  const renderMember = useCallback(
+    ({ item }: { item: AccessRosterEntry }) => (
+      <MemberRow
+        entry={item}
+        groupLabel={groupLabel(item)}
+        roleLabel={roleBadgeText(item.role, t)}
+        inactiveLabel={t('statusInactive')}
+        saffron={colors.saffron}
+        onPress={openEdit}
+      />
+    ),
+    [colors.saffron, groupLabel, openEdit, t]
+  );
 
   return (
-    <Screen contentClassName="relative px-5 pb-10 pt-2">
-      <SectionHeader
+    <Screen scrollable={false} contentClassName="relative px-0 pt-2" animateContent={false}>
+      <FlatList
+        data={!loading && !error ? entries : []}
+        keyExtractor={memberKeyExtractor}
+        renderItem={renderMember}
+        ItemSeparatorComponent={MemberSeparator}
+        ListHeaderComponent={
+          <View>
+            <SectionHeader
         title={t('peopleTitle')}
         subtitle={t('peopleSubtitle')}
         action={
@@ -160,7 +241,7 @@ export default function AdminMembersScreen() {
             <Ionicons name="person-add-outline" size={22} color={colors.saffron} />
           </Pressable>
         }
-      />
+            />
 
       <AppButton label={t('addPerson')} fullWidth onPress={openAdd} />
 
@@ -282,52 +363,16 @@ export default function AdminMembersScreen() {
         </View>
       ) : null}
 
-      {!loading && !error && entries.length === 0 ? (
+            {!loading && !error && entries.length === 0 ? (
         <View style={{ marginTop: SECTION_GAP }}>
           <EmptyState title={t('peopleEmpty')} message={t('peopleEmptyMessage')} />
         </View>
       ) : null}
-
-      {!loading && !error && entries.length > 0 ? (
-        <View style={{ marginTop: SECTION_GAP, gap: 8 }}>
-          {entries.map((entry) => (
-            <Pressable key={entry.id} onPress={() => openEdit(entry)}>
-              <SpiritualSurface variant="elevated">
-                <SpiritualSurfaceBody className="gap-1 py-3.5">
-                  <View className="flex-row items-center gap-3">
-                    <View className="h-10 w-10 items-center justify-center rounded-full bg-saffron/12 dark:bg-gold/15">
-                      <Ionicons
-                        name={entry.role === 'admin' ? 'shield-outline' : 'person-outline'}
-                        size={18}
-                        color={colors.saffron}
-                      />
-                    </View>
-                    <View className="min-w-0 flex-1">
-                      <AppText bold className="text-base text-gp-text dark:text-gp-text-dark">
-                        {entry.name}
-                      </AppText>
-                      <AppText className="text-sm text-gp-muted dark:text-gp-muted-dark">
-                        {entry.phoneNumber}
-                      </AppText>
-                    </View>
-                  </View>
-                  <View className="mt-1 flex-row flex-wrap items-center gap-2 pl-[52px]">
-                    <View className="rounded-full bg-saffron/10 px-2.5 py-1 dark:bg-gold/15">
-                      <AppText bold className="text-xs text-saffron dark:text-gold">
-                        {roleBadgeText(entry.role, t)}
-                        {entry.status === 'inactive' ? ` · ${t('statusInactive')}` : ''}
-                      </AppText>
-                    </View>
-                    <AppText className="text-xs text-gp-muted dark:text-gp-muted-dark">
-                      {groupLabel(entry)}
-                    </AppText>
-                  </View>
-                </SpiritualSurfaceBody>
-              </SpiritualSurface>
-            </Pressable>
-          ))}
-
-          {hasMore ? (
+          </View>
+        }
+        ListHeaderComponentStyle={{ marginBottom: entries.length > 0 && !loading && !error ? SECTION_GAP : 0 }}
+        ListFooterComponent={
+          hasMore && !loading && !error ? (
             <View className="mt-3">
               <AppButton
                 label={loadingMore ? t('pleaseWait') : t('loadMorePeople')}
@@ -337,9 +382,15 @@ export default function AdminMembersScreen() {
                 onPress={() => void loadMore()}
               />
             </View>
-          ) : null}
-        </View>
-      ) : null}
+          ) : null
+        }
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled"
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={7}
+        showsVerticalScrollIndicator={false}
+      />
 
       <RosterEditorSheet
         visible={sheetOpen}

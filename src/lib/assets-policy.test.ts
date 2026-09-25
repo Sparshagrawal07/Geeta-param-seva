@@ -10,6 +10,8 @@ const LOGO_PATH = path.join(IMAGES_DIR, 'logo.png');
 const MAX_LOGO_BYTES = 300 * 1024;
 const MAX_ICON_BYTES = 300 * 1024;
 const MAX_SOUND_BYTES = 512 * 1024;
+const MAX_SPIRITUAL_ASSET_BYTES = 1024 * 1024;
+const MAX_SPIRITUAL_TOTAL_BYTES = 10 * 1024 * 1024;
 
 const GENERATED_ASSETS = [
   'icon.png',
@@ -38,6 +40,8 @@ function walkFiles(dir: string, extensions: string[]): string[] {
 const SPIRITUAL_ASSET_FILENAMES = [
   'temple-hero-light.png',
   'temple-hero-dark.png',
+  'temple-reflection-light.png',
+  'temple-reflection-dark.png',
   'feather-light.png',
   'feather-dark.png',
   'lotus-divider-light.png',
@@ -68,6 +72,27 @@ describe('assets/images policy', () => {
     expect(files).not.toContain('krishna-art.png');
     expect(files).not.toContain('home-hero-light.jpg');
     expect(files).not.toContain('home-hero-dark.jpg');
+  });
+
+  it('keeps runtime spiritual artwork within media budgets', () => {
+    const spiritualDir = path.join(IMAGES_DIR, 'spiritual');
+    const files = walkFiles(spiritualDir, ['.png']);
+    const oversized = files
+      .filter((file) => statSync(file).size > MAX_SPIRITUAL_ASSET_BYTES)
+      .map((file) => path.basename(file));
+    const totalBytes = files.reduce((total, file) => total + statSync(file).size, 0);
+    expect(oversized).toEqual([]);
+    expect(totalBytes).toBeLessThanOrEqual(MAX_SPIRITUAL_TOTAL_BYTES);
+  });
+
+  it('uses precomposed hero reflections without runtime image blur', () => {
+    const hero = readFileSync(
+      path.join(SRC, 'components/verse/home-hero-header.tsx'),
+      'utf8'
+    );
+    expect(hero).toContain('slot="heroTempleReflection"');
+    expect(hero).not.toContain('blurRadius');
+    expect(hero).not.toContain('MaskedView');
   });
 
   it('ships Android/iOS master icon packs', () => {
@@ -133,7 +158,7 @@ describe('google-services package list', () => {
     const googleServices = JSON.parse(
       readFileSync(path.join(ROOT, 'google-services.json'), 'utf8')
     ) as {
-      client: Array<{ client_info: { android_client_info: { package_name: string } } }>;
+      client: { client_info: { android_client_info: { package_name: string } } }[];
     };
     const packages = googleServices.client.map((c) => c.client_info.android_client_info.package_name);
     expect(packages).toEqual(['com.geetaparamseva.app']);
