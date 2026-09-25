@@ -13,6 +13,7 @@ import {
   type MemberAliases,
 } from './member-identity';
 import { sendUserPracticePush } from './push';
+import { loadActiveGroupMembers, type GroupRosterMember } from './roster-query';
 import { getZonedParts, zonedDateKey } from './schedule-math';
 
 export const PRACTICE_TIMEZONE = 'Asia/Kolkata';
@@ -29,7 +30,6 @@ export interface PracticeItem {
 
 const COLLECTION_ASSIGNMENTS = 'member_practice_assignments';
 const COLLECTION_LOGS = 'practice_completion_logs';
-const COLLECTION_ROSTER = 'access_roster';
 const COLLECTION_NOTIFICATIONS = 'notifications';
 const COLLECTION_CHAPTERS = 'gita_chapters';
 const COLLECTION_USERS = 'users';
@@ -190,6 +190,9 @@ async function writeAssignmentDocs(input: {
       {
         uid,
         memberKey,
+        // Recorded so the admin screens can address notifications and push at the
+        // real account without a users scan or an Auth round trip.
+        authUid: aliases.authUid && aliases.authUid !== uid ? aliases.authUid : null,
         groupId,
         phoneNumber: aliases.phoneNumber,
         items,
@@ -403,13 +406,13 @@ export async function setMemberPracticeAssignmentCore(input: {
     throw new HttpsError('invalid-argument', 'Group is required.');
   }
 
-  const aliases = await requireMemberAliases(input);
   const items = normalizePracticeItems(input.items);
 
   // The roster editor always calls this right after saving a member, even when the
   // admin never touched the practice picker. Rejecting an empty list is what made
   // "add member" fail outright, so treat it as "nothing to assign" instead.
   if (items.length === 0) {
+    const aliases = await requireMemberAliases(input);
     return {
       uid: aliases.uid,
       phoneNumber: aliases.phoneNumber,
@@ -421,7 +424,11 @@ export async function setMemberPracticeAssignmentCore(input: {
 
   assertValidPracticeItems(items);
 
-  const groupSnap = await db.collection('groups').doc(groupId).get();
+  // Group existence and member identity are independent — resolve them together.
+  const [aliases, groupSnap] = await Promise.all([
+    requireMemberAliases(input),
+    db.collection('groups').doc(groupId).get(),
+  ]);
   if (!groupSnap.exists) {
     throw new HttpsError('not-found', 'Group not found.');
   }
@@ -709,52 +716,63 @@ export async function getPracticeAdminOverviewCore(input: {
   const groupId = input.groupId.trim();
   const dateKey = practiceDateKey();
 
-  // 4 queries total (not N+1): roster + assignments + today's logs + group profiles.
-  const [rosterDocs, assignmentDocs, logDocs, userDocs] = await Promise.all([
+  // 3 reads, not N+1: roster + today's logs + one batched assignment read.
+  const [rosterMembers, logDocs] = await Promise.all([
     loadActiveRosterMembers(groupId),
-    loadGroupAssignments(groupId),
     loadGroupLogsForDate(groupId, dateKey),
-    loadGroupUserProfiles(groupId),
   ]);
 
-  /** memberKey → account ids seen for that member. */
-  const authUidByMemberKey = new Map<string, string | null>();
-  const rememberAuthUid = (memberKey: string, uid: string | null) => {
-    if (!uid) return;
-    if (uid === memberKey) return;
-    const existing = authUidByMemberKey.get(memberKey);
-    if (existing === undefined || existing === null) authUidByMemberKey.set(memberKey, uid);
+  // Batched point reads keyed by the phone — authoritative for "what does this
+  // member practise", independent of any groupId stamp on the doc.
+  const memberAssignments = await loadAssignmentsByMemberKey(
+    rosterMembers.map((member) => member.memberKey)
+  );
+
+  // Older completion rows only carry an account uid. Repair them once so their
+  // phone-keyed id is recorded; after that the extra profile scan disappears.
+  const legacyLogs = logDocs.filter((doc) => {
+    const memberKey = (doc.data() ?? {}).memberKey;
+    return !(typeof memberKey === 'string' && memberKey.length > 0);
+  });
+  const bridgedUidToMemberKey =
+    legacyLogs.length > 0
+      ? await backfillLegacyLogMemberKeys({
+          groupId,
+          dateKey,
+          legacyLogs,
+          rosterMembers,
+        })
+      : new Map<string, string>();
+
+  /** memberKey → the account id seen for that member, if any. */
+  const authUidByMemberKey = new Map<string, string>();
+  const rememberAuthUid = (memberKey: string, uid: unknown) => {
+    if (typeof uid !== 'string') return;
+    const trimmed = uid.trim();
+    if (!trimmed || trimmed === memberKey) return;
+    if (!authUidByMemberKey.has(memberKey)) authUidByMemberKey.set(memberKey, trimmed);
   };
 
-  for (const doc of userDocs) {
-    const data = doc.data() ?? {};
-    const phone = typeof data.phoneNumber === 'string' ? data.phoneNumber.trim() : '';
-    if (!phone) continue;
-    rememberAuthUid(phoneToUid(phone), doc.id);
+  for (const [uid, memberKey] of bridgedUidToMemberKey) {
+    rememberAuthUid(memberKey, uid);
   }
 
-  // memberKey → items. Every alias of a doc points at the same standing list.
+  // memberKey → items, plus the account id recorded on the assignment doc.
   const itemsByMemberKey = new Map<string, PracticeItem[]>();
   const chapterSet = new Set<number>();
-  for (const doc of assignmentDocs) {
-    const data = (doc.data() ?? {}) as Record<string, unknown>;
-    const items = normalizePracticeItems(data.items);
-    if (items.length === 0) continue;
-
-    const keys = assignmentIdentityKeys(doc.id, data);
-    const docUid = typeof data.uid === 'string' ? data.uid : '';
-    for (const key of keys) rememberAuthUid(key, docUid);
-
-    for (const key of keys) itemsByMemberKey.set(key, items);
-    for (const item of items) {
+  for (const [memberKey, entry] of memberAssignments) {
+    itemsByMemberKey.set(memberKey, entry.items);
+    rememberAuthUid(memberKey, entry.data.authUid);
+    for (const item of entry.items) {
       if (item.type === 'adhyay' && item.chapterNumber) chapterSet.add(item.chapterNumber);
     }
   }
 
-  // Completion keys per identity. New logs carry `memberKey`; legacy ones only `uid`.
+  // Completion keys per identity. New logs carry `memberKey`; legacy ones are
+  // bridged above (and repaired in place so this stays a one-off).
   const completedByKey = new Map<string, Set<string>>();
   for (const doc of logDocs) {
-    const data = doc.data() ?? {};
+    const data = (doc.data() ?? {}) as Record<string, unknown>;
     const itemKey = typeof data.itemKey === 'string' ? data.itemKey : '';
     if (!itemKey) continue;
     for (const key of logIdentityKeys(data)) {
@@ -763,27 +781,34 @@ export async function getPracticeAdminOverviewCore(input: {
       completedByKey.set(key, set);
     }
   }
+  // Attribute bridged legacy rows to their member too.
+  for (const [uid, memberKey] of bridgedUidToMemberKey) {
+    const set = completedByKey.get(uid);
+    if (!set) continue;
+    const target = completedByKey.get(memberKey) ?? new Set<string>();
+    for (const itemKey of set) target.add(itemKey);
+    completedByKey.set(memberKey, target);
+  }
 
   const titles = await loadChapterTitles([...chapterSet]);
   const members: PracticeOverviewMember[] = [];
   const usedRowIds = new Set<string>();
 
-  for (const doc of rosterDocs) {
-    const data = doc.data() ?? {};
-    if (data.role && data.role !== 'user') continue;
+  for (const rosterMember of rosterMembers) {
+    // Admins manage a group from the People tab; this screen tracks members only.
+    if (rosterMember.role !== 'user') continue;
 
-    const phoneNumber = typeof data.phoneNumber === 'string' ? data.phoneNumber : `+${doc.id}`;
-    const memberKey = phoneToUid(phoneNumber);
+    const { memberKey, phoneNumber } = rosterMember;
     const authUid = authUidByMemberKey.get(memberKey) ?? null;
     const aliasUids = [...new Set([authUid, memberKey].filter((id): id is string => Boolean(id)))];
 
-    // Roster doc ids (and therefore phone numbers) are unique, so this row id is
-    // stable across refreshes. The suffix is a guard against a malformed phone
-    // field producing a duplicate React key — it must never drop a member.
-    const rowId = usedRowIds.has(memberKey) ? `${memberKey}#${doc.id}` : memberKey;
+    // memberKey derives from the phone number and roster ids are unique, so this
+    // is stable across refreshes. The suffix guards a malformed phone field
+    // without ever dropping a member.
+    const rowId = usedRowIds.has(memberKey) ? `${memberKey}#${rosterMember.id}` : memberKey;
     usedRowIds.add(rowId);
 
-    const name = typeof data.name === 'string' && data.name ? data.name : phoneNumber;
+    const name = rosterMember.name || phoneNumber;
     const items = itemsByMemberKey.get(memberKey) ?? [];
     if (items.length === 0) {
       members.push({
@@ -834,6 +859,93 @@ export async function getPracticeAdminOverviewCore(input: {
   };
 }
 
+/** Cap on Auth lookups used to bridge a legacy log to its member. */
+const LEGACY_BRIDGE_LIMIT = 20;
+
+/**
+ * Give pre-`memberKey` completion logs their phone-keyed id, once.
+ *
+ * Those rows are only attributable by their account uid, so a stale or missing
+ * `users` profile makes a finished practice look incomplete forever — the member
+ * shows up as "not done" on the admin screen and in the monthly Excel. Stamping
+ * `memberKey` repairs the row in place, so the steady state needs no uid bridge
+ * at all and the extra profile scan disappears.
+ */
+async function backfillLegacyLogMemberKeys(input: {
+  groupId: string;
+  dateKey: string;
+  legacyLogs: FirebaseFirestore.QueryDocumentSnapshot[];
+  rosterMembers: GroupRosterMember[];
+}): Promise<Map<string, string>> {
+  const { groupId, dateKey, legacyLogs, rosterMembers } = input;
+  const memberKeyByUid = new Map<string, string>();
+
+  // 1) Profiles already scoped to the group (the common case, no Auth calls).
+  const [userDocs, assignmentDocs] = await Promise.all([
+    loadGroupUserProfiles(groupId),
+    loadGroupAssignments(groupId),
+  ]);
+  for (const doc of userDocs) {
+    const phone = (doc.data() ?? {}).phoneNumber;
+    if (typeof phone === 'string' && phone.trim()) {
+      memberKeyByUid.set(doc.id, phoneToUid(phone.trim()));
+    }
+  }
+  for (const doc of assignmentDocs) {
+    const data = (doc.data() ?? {}) as Record<string, unknown>;
+    const phone = typeof data.phoneNumber === 'string' ? data.phoneNumber.trim() : '';
+    const memberKey =
+      (typeof data.memberKey === 'string' && data.memberKey.trim()) ||
+      (phone ? phoneToUid(phone) : '');
+    const authUid = typeof data.authUid === 'string' ? data.authUid.trim() : '';
+    if (!memberKey) continue;
+    // Every alias this doc is readable under resolves back to the same member.
+    for (const key of assignmentIdentityKeys(doc.id, data)) {
+      memberKeyByUid.set(key, memberKey);
+    }
+    if (authUid) memberKeyByUid.set(authUid, memberKey);
+  }
+
+  // 2) Anything still unmapped: a bounded Auth lookup by phone.
+  const unmapped = new Set(
+    legacyLogs
+      .map((doc) => (doc.data() ?? {}).uid)
+      .filter((uid): uid is string => typeof uid === 'string' && uid.length > 0)
+      .filter((uid) => !memberKeyByUid.has(uid))
+  );
+  if (unmapped.size > 0) {
+    for (const member of rosterMembers.slice(0, LEGACY_BRIDGE_LIMIT)) {
+      const uid = await findAuthUidByPhone(member.phoneNumber);
+      if (uid) memberKeyByUid.set(uid, member.memberKey);
+    }
+  }
+
+  // 3) Stamp the rows so the next read is a pure point-read path.
+  const batch = db.batch();
+  let patched = 0;
+  for (const doc of legacyLogs) {
+    const data = (doc.data() ?? {}) as Record<string, unknown>;
+    const uid = typeof data.uid === 'string' ? data.uid.trim() : '';
+    const memberKey = uid ? memberKeyByUid.get(uid) : undefined;
+    if (!memberKey) continue;
+    batch.set(
+      doc.ref,
+      { memberKey, practiceDateKey: data.practiceDateKey ?? dateKey },
+      { merge: true }
+    );
+    patched += 1;
+  }
+  if (patched > 0) {
+    await batch.commit().catch((error) => {
+      console.warn('practice_legacy_log_backfill_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  return memberKeyByUid;
+}
+
 /** Ids a completion log can be attributed to. */
 export function logIdentityKeys(data: Record<string, unknown>): string[] {
   const keys = new Set<string>();
@@ -866,13 +978,7 @@ export function assignmentIdentityKeys(
  * `groupId + status` composite index cannot blank the whole screen.
  */
 async function loadActiveRosterMembers(groupId: string) {
-  const filtered = await tryQueryDocs(
-    db.collection(COLLECTION_ROSTER).where('groupId', '==', groupId).where('status', '==', 'active')
-  );
-  if (filtered) return filtered;
-
-  const loose = await tryQueryDocs(db.collection(COLLECTION_ROSTER).where('groupId', '==', groupId));
-  return (loose ?? []).filter((doc) => (doc.data() ?? {}).status !== 'inactive');
+  return loadActiveGroupMembers(groupId);
 }
 
 async function loadGroupAssignments(groupId: string) {
@@ -900,6 +1006,39 @@ async function loadGroupLogsForDate(groupId: string, dateKey: string) {
 async function loadGroupUserProfiles(groupId: string) {
   const docs = await tryQueryDocs(db.collection(COLLECTION_USERS).where('groupId', '==', groupId));
   return docs ?? [];
+}
+
+/**
+ * Read every member's phone-keyed assignment doc in a single batched RPC.
+ *
+ * This — not the group-scoped query — is what makes the practice screen agree
+ * with the People screen. A member added seconds ago, or one whose assignment
+ * doc still carries a previous `groupId`, is resolved here regardless of index
+ * state or stamp drift, so "added on People" always means "listed on Practice".
+ */
+export async function loadAssignmentsByMemberKey(memberKeys: string[]) {
+  const unique = [...new Set(memberKeys.filter(Boolean))];
+  const byMemberKey = new Map<string, { data: Record<string, unknown>; items: PracticeItem[] }>();
+  if (unique.length === 0) return byMemberKey;
+
+  try {
+    const snaps = await db.getAll(
+      ...unique.map((memberKey) => db.collection(COLLECTION_ASSIGNMENTS).doc(memberKey))
+    );
+    for (const snap of snaps) {
+      if (!snap.exists) continue;
+      const data = (snap.data() ?? {}) as Record<string, unknown>;
+      const items = normalizePracticeItems(data.items);
+      if (items.length === 0) continue;
+      byMemberKey.set(snap.id, { data, items });
+    }
+  } catch (error) {
+    console.warn('practice_assignment_batch_read_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  return byMemberKey;
 }
 
 /** Cap on Auth lookups so a large "remind everyone" stays inside the callable budget. */

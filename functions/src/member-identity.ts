@@ -126,11 +126,17 @@ export async function resolveMemberAliases(input: {
   const memberKey = phoneNumber ? phoneToUid(phoneNumber) : null;
   if (memberKey) addUid(found, memberKey);
 
+  // Both lookups only need the phone number, so they run concurrently — this is
+  // the difference between 3 and 2 round trips on every admin write.
   let authUid: string | null = null;
   if (phoneNumber) {
-    authUid = await findAuthUidByPhone(phoneNumber);
+    const [resolvedAuthUid, userDocIds] = await Promise.all([
+      findAuthUidByPhone(phoneNumber),
+      findUserDocIdsByPhone(phoneNumber),
+    ]);
+    authUid = resolvedAuthUid;
     addUid(found, authUid);
-    for (const id of await findUserDocIdsByPhone(phoneNumber)) addUid(found, id);
+    for (const id of userDocIds) addUid(found, id);
   }
 
   const all = [...found];

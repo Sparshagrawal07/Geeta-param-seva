@@ -13,21 +13,25 @@ import { phoneToUid } from './member-identity';
 import {
   PRACTICE_TIMEZONE,
   assignmentIdentityKeys,
+  loadAssignmentsByMemberKey,
   logIdentityKeys,
   normalizePracticeItems,
   practiceDateKey,
   type PracticeItem,
 } from './practice';
 import { sendUserPracticePush } from './push';
+import { loadActiveGroupMembers, ROSTER_SCAN_LIMIT } from './roster-query';
 import { getZonedParts } from './schedule-math';
 
 const COLLECTION_ASSIGNMENTS = 'member_practice_assignments';
 const COLLECTION_LOGS = 'practice_completion_logs';
-const COLLECTION_ROSTER = 'access_roster';
 const COLLECTION_NOTIFICATIONS = 'notifications';
 const COLLECTION_GROUPS = 'groups';
 const COLLECTION_USERS = 'users';
 const COLLECTION_REPORT_REMINDERS = 'practice_report_reminders';
+
+/** The Excel is generated for the whole group, so scan the full roster. */
+const ROSTER_REPORT_SCAN_LIMIT = ROSTER_SCAN_LIMIT;
 
 const BRAND_SAFFRON = 'FFC45C26';
 const BRAND_GOLD = 'FFD4A017';
@@ -116,12 +120,8 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
   const fromDateKey = `${monthKeyFromDateKey(toDateKey)}-01`;
   const dateKeys = listDateKeysThrough(toDateKey);
 
-  const [rosterSnap, assignmentsSnap, logsSnap, groupSnap, usersSnap] = await Promise.all([
-    db
-      .collection(COLLECTION_ROSTER)
-      .where('groupId', '==', groupId)
-      .where('status', '==', 'active')
-      .get(),
+  const [rosterMembers, assignmentsSnap, logsSnap, groupSnap, usersSnap] = await Promise.all([
+    loadActiveGroupMembers(groupId, ROSTER_REPORT_SCAN_LIMIT),
     db.collection(COLLECTION_ASSIGNMENTS).where('groupId', '==', groupId).get(),
     db
       .collection(COLLECTION_LOGS)
@@ -132,6 +132,12 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
     db.collection(COLLECTION_GROUPS).doc(groupId).get(),
     db.collection(COLLECTION_USERS).where('groupId', '==', groupId).get(),
   ]);
+
+  // Same batched phone-keyed read the Practice screen uses, so a member whose
+  // assignment doc still carries a previous groupId is not reported as blank.
+  const memberAssignments = await loadAssignmentsByMemberKey(
+    rosterMembers.map((member) => member.memberKey)
+  );
 
   const groupName =
     typeof groupSnap.data()?.name === 'string' && groupSnap.data()?.name
@@ -151,6 +157,11 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
     identityKeysByMemberKey.set(memberKey, set);
   };
 
+  for (const [memberKey, entry] of memberAssignments) {
+    itemsByMemberKey.set(memberKey, entry.items);
+    linkIdentity(memberKey, memberKey);
+  }
+
   for (const doc of assignmentsSnap.docs) {
     const data = (doc.data() ?? {}) as Record<string, unknown>;
     const items = normalizePracticeItems(data.items);
@@ -160,7 +171,7 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
     const memberKey =
       (typeof data.memberKey === 'string' && data.memberKey.trim()) ||
       (phone ? phoneToUid(phone) : doc.id);
-    itemsByMemberKey.set(memberKey, items);
+    if (!itemsByMemberKey.has(memberKey)) itemsByMemberKey.set(memberKey, items);
     linkIdentity(memberKey, memberKey);
     for (const key of assignmentIdentityKeys(doc.id, data)) linkIdentity(memberKey, key);
   }
@@ -197,12 +208,11 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
 
   const rows: Row[] = [];
 
-  for (const doc of rosterSnap.docs) {
-    const data = doc.data() ?? {};
-    if (data.role && data.role !== 'user') continue;
-    const phoneNumber = typeof data.phoneNumber === 'string' ? data.phoneNumber : `+${doc.id}`;
-    const memberKey = phoneToUid(phoneNumber);
-    const name = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : phoneNumber;
+  for (const member of rosterMembers) {
+    if (member.role !== 'user') continue;
+
+    const { memberKey, phoneNumber } = member;
+    const name = member.name.trim() ? member.name.trim() : phoneNumber;
     const items = itemsByMemberKey.get(memberKey) ?? [];
     const identityKeys = identityKeysByMemberKey.get(memberKey) ?? new Set([memberKey]);
     identityKeys.add(memberKey);

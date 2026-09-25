@@ -1,10 +1,17 @@
-import { FieldValue, type DocumentData, type Query } from 'firebase-admin/firestore';
+import { FieldValue, type DocumentData } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 
 import { adminAuth, db } from './firebase-admin';
 import { findUserDocIdsByPhone, phoneToRosterId } from './member-identity';
 import { reassignMemberPracticeGroup } from './practice';
 import { reindexUserPushTokens } from './push';
+import {
+  loadGroupAdmins,
+  loadRosterMembers,
+  ROSTER_MAX_PAGE_SIZE,
+  ROSTER_SCAN_LIMIT,
+  type GroupRosterMember,
+} from './roster-query';
 import { revokeAllUserSessions } from './sessions';
 
 export { phoneToRosterId };
@@ -66,6 +73,18 @@ function serializeRosterDoc(id: string, data: DocumentData) {
   };
 }
 
+function serializeRosterEntry(member: GroupRosterMember) {
+  return {
+    id: member.id,
+    name: member.name,
+    phoneNumber: member.phoneNumber,
+    role: member.role,
+    groupId: member.groupId,
+    assignedGroupIds: member.assignedGroupIds,
+    status: member.status,
+  };
+}
+
 /**
  * Admin-safe roster list via Admin SDK (avoids client list-rule failures).
  */
@@ -82,7 +101,7 @@ export async function listAccessRosterCore(input: {
   const role = input.role === 'user' || input.role === 'admin' ? input.role : 'all';
   const status = input.status === 'active' || input.status === 'inactive' ? input.status : 'all';
   const search = typeof input.search === 'string' ? input.search.trim().toLowerCase() : '';
-  const pageSize = Math.min(Math.max(Number(input.pageSize) || 50, 1), 200);
+  const pageSize = Math.min(Math.max(Number(input.pageSize) || 50, 1), ROSTER_MAX_PAGE_SIZE);
 
   if (groupId) {
     assertCallerCanTouchGroups(caller, [groupId]);
@@ -90,27 +109,19 @@ export async function listAccessRosterCore(input: {
     throw new HttpsError('invalid-argument', 'Group is required.');
   }
 
-  const byId = new Map<string, ReturnType<typeof serializeRosterDoc>>();
   const scanLimit = Math.max(pageSize, ROSTER_SCAN_LIMIT);
+  const byId = new Map<string, ReturnType<typeof serializeRosterEntry>>();
 
   if (!groupId || role !== 'admin') {
-    for (const doc of await queryRosterMembers({
-      groupId: groupId || null,
-      role,
-      status,
-      limit: scanLimit,
-    })) {
-      byId.set(doc.id, serializeRosterDoc(doc.id, doc.data()));
+    const members = await loadRosterMembers({ groupId: groupId || null, role, status }, scanLimit);
+    for (const member of members) {
+      byId.set(member.id, serializeRosterEntry(member));
     }
   }
 
   if (groupId && (role === 'all' || role === 'admin')) {
-    for (const doc of await queryRosterAdmins({
-      groupId,
-      status,
-      limit: ROSTER_SCAN_LIMIT,
-    })) {
-      byId.set(doc.id, serializeRosterDoc(doc.id, doc.data()));
+    for (const member of await loadGroupAdmins(groupId, status, scanLimit)) {
+      byId.set(member.id, serializeRosterEntry(member));
     }
   }
 
@@ -171,77 +182,9 @@ function assertCallerCanTouchGroups(
  *  - a composite index that had not finished building, and
  *  - older roster docs with no `status` field, which a `status == 'active'`
  *    filter silently drops.
- * Filtering on a single field (always indexed) and defaulting the missing
- * values keeps the list correct either way, for the cost of one extra read.
+ * `roster-query` owns that degradation ladder so People, Dashboard and Practice
+ * all resolve the same member set.
  */
-const ROSTER_SCAN_LIMIT = 500;
-
-function rosterRole(data: DocumentData): RosterRole {
-  return data.role === 'admin' ? 'admin' : 'user';
-}
-
-function rosterStatus(data: DocumentData): RosterStatus {
-  return data.status === 'inactive' ? 'inactive' : 'active';
-}
-
-async function runQuery(query: Query) {
-  try {
-    return (await query.get()).docs;
-  } catch (error) {
-    console.error('access_roster query failed', error);
-    return null;
-  }
-}
-
-async function queryRosterMembers(input: {
-  groupId: string | null;
-  role: 'user' | 'admin' | 'all';
-  status: 'active' | 'inactive' | 'all';
-  limit: number;
-}) {
-  const base = input.groupId
-    ? db.collection('access_roster').where('groupId', '==', input.groupId)
-    : db.collection('access_roster');
-
-  const docs = await runQuery(base.limit(input.limit));
-  if (!docs) {
-    // Last resort: unfiltered scan, narrowed in memory.
-    const all = await runQuery(db.collection('access_roster').limit(input.limit));
-    if (!all) return [];
-    return all.filter((doc) => matchesRosterFilters(doc.data() ?? {}, input));
-  }
-
-  return docs.filter((doc) => matchesRosterFilters(doc.data() ?? {}, input));
-}
-
-function matchesRosterFilters(
-  data: DocumentData,
-  input: { groupId: string | null; role: 'user' | 'admin' | 'all'; status: 'active' | 'inactive' | 'all' }
-): boolean {
-  if (input.groupId && data.groupId !== input.groupId) return false;
-  if (input.role !== 'all' && rosterRole(data) !== input.role) return false;
-  if (input.status !== 'all' && rosterStatus(data) !== input.status) return false;
-  return true;
-}
-
-async function queryRosterAdmins(input: {
-  groupId: string;
-  status: 'active' | 'inactive' | 'all';
-  limit: number;
-}) {
-  const docs = await runQuery(
-    db
-      .collection('access_roster')
-      .where('assignedGroupIds', 'array-contains', input.groupId)
-      .limit(input.limit)
-  );
-  if (!docs) return [];
-  return docs.filter((doc) => {
-    const data = doc.data() ?? {};
-    if (rosterRole(data) !== 'admin') return false;
-    return input.status === 'all' || rosterStatus(data) === input.status;
-  });
-}
 
 async function assertGroupsExist(groupIds: string[]) {
   const snaps = await Promise.all(groupIds.map((groupId) => db.collection('groups').doc(groupId).get()));

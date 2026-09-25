@@ -7,6 +7,7 @@ import {
   cleanupExpiredBackendRecords,
   wipeDailyFeedContent,
 } from './feed-cleanup';
+import { recomputeGroupCounters } from './group-counters';
 import {
   notifyCommunityPostPublishedCore,
   type CommunityPostNotifyType,
@@ -72,6 +73,28 @@ const callableOptions = {
   enforceAppCheck: enforceAppCheck(),
 };
 
+/**
+ * Warm instances for the handful of callables every screen hits.
+ *
+ * Without a minimum the instance scales to zero between openings, and the first
+ * call after an idle period pays a full cold start — which is what made the app
+ * feel "very very slow" even though the queries themselves are small. Only the
+ * hot path is pinned; everything else still scales to zero.
+ *
+ * Set the `WARM_MIN_INSTANCES` env var to `0` to trade the latency back for a
+ * smaller idle bill (the value is clamped, so a typo can never scale up).
+ */
+const WARM_MIN_INSTANCES = Math.min(
+  Math.max(Number(process.env.WARM_MIN_INSTANCES ?? '1') || 0, 0),
+  5
+);
+
+/** Callable options for the latency-sensitive read/write path. */
+const warmCallableOptions = {
+  ...callableOptions,
+  minInstances: WARM_MIN_INSTANCES,
+};
+
 function toHttpsError(error: unknown) {
   if (error instanceof HttpsError) {
     return error;
@@ -108,7 +131,7 @@ async function assertCanManageGroup(uid: string, groupId: string) {
 }
 
 /** Phone + PIN → Firebase custom token (no SMS / reCAPTCHA). */
-export const signInWithGroupPin = onCall(callableOptions, async (request) => {
+export const signInWithGroupPin = onCall(warmCallableOptions, async (request) => {
   try {
     const phoneNumber = normalizeE164Phone(request.data?.phoneNumber);
     const pin = normalizePin(request.data?.pin);
@@ -219,7 +242,7 @@ export const setGroupPin = onCall(callableOptions, async (request) => {
 });
 
 /** Add or update access_roster entry (CF-only writes). */
-export const upsertAccessRoster = onCall(callableOptions, async (request) => {
+export const upsertAccessRoster = onCall(warmCallableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -239,7 +262,7 @@ export const upsertAccessRoster = onCall(callableOptions, async (request) => {
 });
 
 /** Soft-deactivate an access_roster entry. */
-export const deactivateAccessRoster = onCall(callableOptions, async (request) => {
+export const deactivateAccessRoster = onCall(warmCallableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -319,7 +342,7 @@ export const markJoinApplicationAdded = onCall(callableOptions, async (request) 
 });
 
 /** Admin list roster (Admin SDK — reliable vs client list rules). */
-export const listAccessRoster = onCall(callableOptions, async (request) => {
+export const listAccessRoster = onCall(warmCallableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -358,7 +381,7 @@ export const migrateWhitelistToRoster = onCall(callableOptions, async (request) 
 });
 
 /** Admin sets standing Adhyay/Aarti practice for a member. */
-export const setMemberPracticeAssignment = onCall(callableOptions, async (request) => {
+export const setMemberPracticeAssignment = onCall(warmCallableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -381,7 +404,7 @@ export const setMemberPracticeAssignment = onCall(callableOptions, async (reques
 });
 
 /** Member home: today's standing practice + completion flags. */
-export const getMyPracticeToday = onCall(callableOptions, async (request) => {
+export const getMyPracticeToday = onCall(warmCallableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -393,7 +416,7 @@ export const getMyPracticeToday = onCall(callableOptions, async (request) => {
 });
 
 /** Member marks one Adhyay/Aarti complete for the current practice day. */
-export const markPracticeItemComplete = onCall(callableOptions, async (request) => {
+export const markPracticeItemComplete = onCall(warmCallableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -412,7 +435,7 @@ export const markPracticeItemComplete = onCall(callableOptions, async (request) 
 });
 
 /** Member marks all pending Adhyays/Aarti complete for the current practice day. */
-export const markAllPracticeComplete = onCall(callableOptions, async (request) => {
+export const markAllPracticeComplete = onCall(warmCallableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -424,7 +447,7 @@ export const markAllPracticeComplete = onCall(callableOptions, async (request) =
 });
 
 /** Admin: per-member practice completion for current practice day. */
-export const getPracticeAdminOverview = onCall(callableOptions, async (request) => {
+export const getPracticeAdminOverview = onCall(warmCallableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -441,7 +464,7 @@ export const getPracticeAdminOverview = onCall(callableOptions, async (request) 
 });
 
 /** Admin: push reminder to one incomplete member or all incomplete. */
-export const sendPracticeReminder = onCall(callableOptions, async (request) => {
+export const sendPracticeReminder = onCall(warmCallableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -569,11 +592,35 @@ export const wipeDailyFeed = onSchedule(
     timeZone: 'Asia/Kolkata',
   },
   async () => {
-    const [feed, retention] = await Promise.all([
+    const [feed, retention, counters] = await Promise.all([
       wipeDailyFeedContent(),
       cleanupExpiredBackendRecords(),
+      // The wipe zeroes post/poll counts, and client-side creates never raise
+      // them again — recompute from the source collections in the same run.
+      recomputeGroupCounters(),
     ]);
-    console.log('wipeDailyFeed', { feed, retention });
+    console.log('wipeDailyFeed', { feed, retention, counters });
+  }
+);
+
+/**
+ * Counter self-heal.
+ *
+ * The dashboard reads `groups/{id}.memberCount | postCount | pollCount`, and the
+ * client creates posts/polls directly in Firestore, so those counters drift
+ * permanently. This recomputes them from the source collections — idempotent
+ * overwrites, so retries cannot inflate them.
+ */
+export const syncGroupCounters = onSchedule(
+  {
+    schedule: '*/30 * * * *',
+    region,
+    timeZone: 'Asia/Kolkata',
+    timeoutSeconds: 300,
+  },
+  async () => {
+    const result = await recomputeGroupCounters();
+    console.log('syncGroupCounters', result);
   }
 );
 
