@@ -9,9 +9,11 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 
 import { db } from './firebase-admin';
-import { phoneToUid } from './pin-auth';
+import { phoneToUid } from './member-identity';
 import {
   PRACTICE_TIMEZONE,
+  assignmentIdentityKeys,
+  logIdentityKeys,
   normalizePracticeItems,
   practiceDateKey,
   type PracticeItem,
@@ -114,7 +116,7 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
   const fromDateKey = `${monthKeyFromDateKey(toDateKey)}-01`;
   const dateKeys = listDateKeysThrough(toDateKey);
 
-  const [rosterSnap, assignmentsSnap, logsSnap, groupSnap] = await Promise.all([
+  const [rosterSnap, assignmentsSnap, logsSnap, groupSnap, usersSnap] = await Promise.all([
     db
       .collection(COLLECTION_ROSTER)
       .where('groupId', '==', groupId)
@@ -128,6 +130,7 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
       .where('practiceDateKey', '<=', toDateKey)
       .get(),
     db.collection(COLLECTION_GROUPS).doc(groupId).get(),
+    db.collection(COLLECTION_USERS).where('groupId', '==', groupId).get(),
   ]);
 
   const groupName =
@@ -135,24 +138,54 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
       ? String(groupSnap.data()?.name)
       : groupId;
 
-  const assignmentsByUid = new Map<string, PracticeItem[]>();
+  // A member's standing list and their completion logs can be filed under
+  // different ids (phone-keyed id vs. Auth uid). Index both sides by every id
+  // they may be read under, then join on the phone-keyed id the roster knows.
+  const itemsByMemberKey = new Map<string, PracticeItem[]>();
+  const identityKeysByMemberKey = new Map<string, Set<string>>();
+
+  const linkIdentity = (memberKey: string, id: string) => {
+    if (!id) return;
+    const set = identityKeysByMemberKey.get(memberKey) ?? new Set<string>();
+    set.add(id);
+    identityKeysByMemberKey.set(memberKey, set);
+  };
+
   for (const doc of assignmentsSnap.docs) {
-    assignmentsByUid.set(doc.id, normalizePracticeItems(doc.data()?.items));
+    const data = (doc.data() ?? {}) as Record<string, unknown>;
+    const items = normalizePracticeItems(data.items);
+    if (items.length === 0) continue;
+
+    const phone = typeof data.phoneNumber === 'string' ? data.phoneNumber.trim() : '';
+    const memberKey =
+      (typeof data.memberKey === 'string' && data.memberKey.trim()) ||
+      (phone ? phoneToUid(phone) : doc.id);
+    itemsByMemberKey.set(memberKey, items);
+    linkIdentity(memberKey, memberKey);
+    for (const key of assignmentIdentityKeys(doc.id, data)) linkIdentity(memberKey, key);
   }
 
-  /** uid → dateKey → completed itemKeys */
-  const completedByUidDate = new Map<string, Map<string, Set<string>>>();
+  // Profiles bridge accounts that predate the phone-keyed assignment docs.
+  for (const doc of usersSnap.docs) {
+    const phone = doc.data()?.phoneNumber;
+    if (typeof phone !== 'string' || !phone.trim()) continue;
+    linkIdentity(phoneToUid(phone.trim()), doc.id);
+  }
+
+  /** identity → dateKey → completed itemKeys */
+  const completedByKeyDate = new Map<string, Map<string, Set<string>>>();
   for (const doc of logsSnap.docs) {
-    const data = doc.data() ?? {};
-    const uid = typeof data.uid === 'string' ? data.uid : '';
+    const data = (doc.data() ?? {}) as Record<string, unknown>;
     const dateKey = typeof data.practiceDateKey === 'string' ? data.practiceDateKey : '';
     const itemKey = typeof data.itemKey === 'string' ? data.itemKey : '';
-    if (!uid || !dateKey || !itemKey) continue;
-    const byDate = completedByUidDate.get(uid) ?? new Map<string, Set<string>>();
-    const set = byDate.get(dateKey) ?? new Set<string>();
-    set.add(itemKey);
-    byDate.set(dateKey, set);
-    completedByUidDate.set(uid, byDate);
+    if (!dateKey || !itemKey) continue;
+    for (const key of logIdentityKeys(data)) {
+      const byDate = completedByKeyDate.get(key) ?? new Map<string, Set<string>>();
+      const set = byDate.get(dateKey) ?? new Set<string>();
+      set.add(itemKey);
+      byDate.set(dateKey, set);
+      completedByKeyDate.set(key, byDate);
+    }
   }
 
   type Row = {
@@ -168,9 +201,11 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
     const data = doc.data() ?? {};
     if (data.role && data.role !== 'user') continue;
     const phoneNumber = typeof data.phoneNumber === 'string' ? data.phoneNumber : `+${doc.id}`;
-    const uid = phoneToUid(phoneNumber);
+    const memberKey = phoneToUid(phoneNumber);
     const name = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : phoneNumber;
-    const items = assignmentsByUid.get(uid) ?? [];
+    const items = itemsByMemberKey.get(memberKey) ?? [];
+    const identityKeys = identityKeysByMemberKey.get(memberKey) ?? new Set([memberKey]);
+    identityKeys.add(memberKey);
     const cells: Record<string, 'Yes' | 'No' | ''> = {};
 
     for (const dateKey of dateKeys) {
@@ -178,7 +213,12 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
         cells[dateKey] = '';
         continue;
       }
-      const completed = completedByUidDate.get(uid)?.get(dateKey) ?? new Set<string>();
+      const completed = new Set<string>();
+      for (const key of identityKeys) {
+        for (const itemKey of completedByKeyDate.get(key)?.get(dateKey) ?? []) {
+          completed.add(itemKey);
+        }
+      }
       const allDone = items.every((item) => completed.has(item.itemKey));
       cells[dateKey] = allDone ? 'Yes' : 'No';
     }

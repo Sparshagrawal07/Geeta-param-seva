@@ -4,8 +4,11 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 
 import { adminAuth, db } from './firebase-admin';
+import { phoneToUid } from './member-identity';
 import { claimPinHash, isPinHashTaken, releasePinHash } from './pin-hashes';
 import { getAccessRoster } from './roster';
+
+export { phoneToUid };
 
 const PIN_MIN_LENGTH = 4;
 const PIN_MAX_LENGTH = 8;
@@ -41,11 +44,6 @@ export function pinsMatch(pin: string, pinHash: string | undefined): boolean {
     return false;
   }
   return timingSafeEqual(next, prev);
-}
-
-export function phoneToUid(phoneNumber: string): string {
-  const digits = phoneNumber.replace(/\D/g, '');
-  return `u${digits}`;
 }
 
 export function normalizeE164Phone(input: unknown): string {

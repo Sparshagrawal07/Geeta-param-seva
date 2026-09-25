@@ -2,7 +2,12 @@ import { FieldValue, type DocumentData, type Query } from 'firebase-admin/firest
 import { HttpsError } from 'firebase-functions/v2/https';
 
 import { adminAuth, db } from './firebase-admin';
+import { findUserDocIdsByPhone, phoneToRosterId } from './member-identity';
+import { reassignMemberPracticeGroup } from './practice';
+import { reindexUserPushTokens } from './push';
 import { revokeAllUserSessions } from './sessions';
+
+export { phoneToRosterId };
 
 export type RosterRole = 'user' | 'admin';
 export type RosterStatus = 'active' | 'inactive';
@@ -27,10 +32,6 @@ function normalizeRosterPhone(input: unknown): string {
     throw new HttpsError('invalid-argument', 'Enter a valid mobile number.');
   }
   return withPlus;
-}
-
-export function phoneToRosterId(phoneNumber: string): string {
-  return phoneNumber.replace(/^\+/, '').replace(/\D/g, '');
 }
 
 export async function getAccessRoster(
@@ -90,28 +91,25 @@ export async function listAccessRosterCore(input: {
   }
 
   const byId = new Map<string, ReturnType<typeof serializeRosterDoc>>();
+  const scanLimit = Math.max(pageSize, ROSTER_SCAN_LIMIT);
 
   if (!groupId || role !== 'admin') {
-    let q: Query = db.collection('access_roster');
-    if (groupId) q = q.where('groupId', '==', groupId);
-    if (role === 'user') q = q.where('role', '==', 'user');
-    if (status !== 'all') q = q.where('status', '==', status);
-    q = q.orderBy('name').limit(Math.max(pageSize, 100));
-    const snap = await q.get();
-    for (const doc of snap.docs) {
+    for (const doc of await queryRosterMembers({
+      groupId: groupId || null,
+      role,
+      status,
+      limit: scanLimit,
+    })) {
       byId.set(doc.id, serializeRosterDoc(doc.id, doc.data()));
     }
   }
 
   if (groupId && (role === 'all' || role === 'admin')) {
-    let adminQuery: Query = db
-      .collection('access_roster')
-      .where('assignedGroupIds', 'array-contains', groupId)
-      .where('role', '==', 'admin');
-    if (status !== 'all') adminQuery = adminQuery.where('status', '==', status);
-    adminQuery = adminQuery.orderBy('name').limit(50);
-    const adminSnap = await adminQuery.get();
-    for (const doc of adminSnap.docs) {
+    for (const doc of await queryRosterAdmins({
+      groupId,
+      status,
+      limit: ROSTER_SCAN_LIMIT,
+    })) {
       byId.set(doc.id, serializeRosterDoc(doc.id, doc.data()));
     }
   }
@@ -130,6 +128,7 @@ export async function listAccessRosterCore(input: {
   return {
     entries: page,
     hasMore: entries.length > pageSize,
+    total: entries.length,
   };
 }
 
@@ -165,6 +164,85 @@ function assertCallerCanTouchGroups(
   }
 }
 
+/**
+ * Queries here deliberately avoid `orderBy` and are re-filtered in memory.
+ *
+ * Two failure modes made a freshly added member "not appear at all":
+ *  - a composite index that had not finished building, and
+ *  - older roster docs with no `status` field, which a `status == 'active'`
+ *    filter silently drops.
+ * Filtering on a single field (always indexed) and defaulting the missing
+ * values keeps the list correct either way, for the cost of one extra read.
+ */
+const ROSTER_SCAN_LIMIT = 500;
+
+function rosterRole(data: DocumentData): RosterRole {
+  return data.role === 'admin' ? 'admin' : 'user';
+}
+
+function rosterStatus(data: DocumentData): RosterStatus {
+  return data.status === 'inactive' ? 'inactive' : 'active';
+}
+
+async function runQuery(query: Query) {
+  try {
+    return (await query.get()).docs;
+  } catch (error) {
+    console.error('access_roster query failed', error);
+    return null;
+  }
+}
+
+async function queryRosterMembers(input: {
+  groupId: string | null;
+  role: 'user' | 'admin' | 'all';
+  status: 'active' | 'inactive' | 'all';
+  limit: number;
+}) {
+  const base = input.groupId
+    ? db.collection('access_roster').where('groupId', '==', input.groupId)
+    : db.collection('access_roster');
+
+  const docs = await runQuery(base.limit(input.limit));
+  if (!docs) {
+    // Last resort: unfiltered scan, narrowed in memory.
+    const all = await runQuery(db.collection('access_roster').limit(input.limit));
+    if (!all) return [];
+    return all.filter((doc) => matchesRosterFilters(doc.data() ?? {}, input));
+  }
+
+  return docs.filter((doc) => matchesRosterFilters(doc.data() ?? {}, input));
+}
+
+function matchesRosterFilters(
+  data: DocumentData,
+  input: { groupId: string | null; role: 'user' | 'admin' | 'all'; status: 'active' | 'inactive' | 'all' }
+): boolean {
+  if (input.groupId && data.groupId !== input.groupId) return false;
+  if (input.role !== 'all' && rosterRole(data) !== input.role) return false;
+  if (input.status !== 'all' && rosterStatus(data) !== input.status) return false;
+  return true;
+}
+
+async function queryRosterAdmins(input: {
+  groupId: string;
+  status: 'active' | 'inactive' | 'all';
+  limit: number;
+}) {
+  const docs = await runQuery(
+    db
+      .collection('access_roster')
+      .where('assignedGroupIds', 'array-contains', input.groupId)
+      .limit(input.limit)
+  );
+  if (!docs) return [];
+  return docs.filter((doc) => {
+    const data = doc.data() ?? {};
+    if (rosterRole(data) !== 'admin') return false;
+    return input.status === 'all' || rosterStatus(data) === input.status;
+  });
+}
+
 async function assertGroupsExist(groupIds: string[]) {
   const snaps = await Promise.all(groupIds.map((groupId) => db.collection('groups').doc(groupId).get()));
   for (let i = 0; i < snaps.length; i++) {
@@ -172,6 +250,85 @@ async function assertGroupsExist(groupIds: string[]) {
       throw new HttpsError('not-found', `Group not found: ${groupIds[i]}`);
     }
   }
+}
+
+/** Every Auth uid that has ever signed in with this phone number. */
+async function listAuthUidsForPhone(phoneNumber: string): Promise<string[]> {
+  const uids = new Set<string>();
+  try {
+    const authUser = await adminAuth.getUserByPhoneNumber(phoneNumber);
+    uids.add(authUser.uid);
+  } catch {
+    // Member has never signed in — nothing to sync yet.
+  }
+  for (const uid of await findUserDocIdsByPhone(phoneNumber)) {
+    uids.add(uid);
+  }
+  return [...uids];
+}
+
+/**
+ * Push a roster decision straight onto the member's `users` profile.
+ *
+ * Firestore rules (and the client's group scoping) read role / groupId /
+ * assignedGroupIds from `users`, not from `access_roster`. Without this the
+ * profile only catches up the next time the member signs in, which is why an
+ * admin's change looked like it "took effect only after reopening the app".
+ */
+async function syncAuthProfilesForPhone(input: {
+  phoneNumber: string;
+  name: string;
+  role: RosterRole;
+  groupId: string | null;
+  assignedGroupIds: string[];
+  status: RosterStatus;
+  hasPersonalPin: boolean;
+}): Promise<string[]> {
+  // A senior admin's authority lives in `senior_admins`; never let a roster row
+  // downgrade their profile.
+  const seniorSnap = await db
+    .collection('senior_admins')
+    .doc(phoneToRosterId(input.phoneNumber))
+    .get()
+    .catch(() => null);
+  if (seniorSnap?.exists) return [];
+
+  const uids = await listAuthUidsForPhone(input.phoneNumber);
+  if (uids.length === 0) return [];
+
+  const profilePatch: Record<string, unknown> = {
+    phoneNumber: input.phoneNumber,
+    role: input.role,
+    groupId: input.role === 'user' ? input.groupId : null,
+    assignedGroupIds: input.role === 'admin' ? input.assignedGroupIds : [],
+    hasPersonalPin: input.hasPersonalPin,
+    // Mirrors upsertProfileFromLogin so the profile stays identical whichever
+    // path wrote it last. Only read as a protected field by the rules.
+    whitelistKey: input.role === 'admin' ? phoneToRosterId(input.phoneNumber) : null,
+    rosterStatus: input.status,
+    rosterUpdatedAt: FieldValue.serverTimestamp(),
+  };
+  if (input.name) profilePatch.name = input.name;
+  if (input.status === 'inactive') {
+    // Deactivated members lose group read access immediately (rules check
+    // `groupId`), and the restored value is written again on reactivation.
+    profilePatch.groupId = null;
+    profilePatch.assignedGroupIds = [];
+  }
+
+  await Promise.all(
+    uids.map((uid) =>
+      db
+        .collection('users')
+        .doc(uid)
+        .set(profilePatch, { merge: true })
+        .catch((error) => {
+          console.warn('roster_profile_sync_failed', { uid, error });
+        })
+    )
+  );
+
+  return uids;
 }
 
 /**
@@ -248,6 +405,7 @@ export async function upsertAccessRosterEntry(input: {
   const previousRole = previous.role === 'admin' ? 'admin' : previous.role === 'user' ? 'user' : null;
   const previousStatus = previous.status === 'inactive' ? 'inactive' : existing.exists ? 'active' : null;
   const previousGroupId = typeof previous.groupId === 'string' ? previous.groupId : null;
+  const hasPersonalPin = typeof previous.pinHash === 'string' && previous.pinHash.length > 0;
 
   const payload: Record<string, unknown> = {
     name,
@@ -257,6 +415,7 @@ export async function upsertAccessRosterEntry(input: {
     groupId,
     assignedGroupIds,
     status,
+    hasPersonalPin,
     updatedAt: FieldValue.serverTimestamp(),
   };
 
@@ -284,7 +443,45 @@ export async function upsertAccessRosterEntry(input: {
       .set({ memberCount: FieldValue.increment(1), statsUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
 
-  return { id: phoneId, ...payload, createdBy: existing.data()?.createdBy ?? input.actorUid };
+  // Keep already-signed-in profiles in step with the roster so the member sees
+  // the new name / group on their next read instead of after a fresh sign-in.
+  const syncedUids = await syncAuthProfilesForPhone({
+    phoneNumber,
+    name,
+    role,
+    groupId,
+    assignedGroupIds,
+    status,
+    hasPersonalPin,
+  });
+
+  // A group move leaves the old group's push-token index behind. Re-index every
+  // known device so reminders reach the member under their new group.
+  if (previousGroupId && previousGroupId !== groupId) {
+    await Promise.all(
+      syncedUids.map((uid) =>
+        reindexUserPushTokens(uid).catch((error) => {
+          console.warn('roster_push_reindex_failed', { uid, error });
+        })
+      )
+    );
+
+    // Carry the standing practice across so the new group's practice screen is
+    // not left claiming the member has no assignment.
+    await reassignMemberPracticeGroup({
+      phoneNumber,
+      groupId,
+      actorUid: input.actorUid,
+    }).catch((error) => {
+      console.warn('roster_practice_reassign_failed', { phoneNumber, error });
+    });
+  }
+
+  const saved = await ref.get();
+  return {
+    ...serializeRosterDoc(phoneId, saved.data() ?? {}),
+    created: !existing.exists,
+  };
 }
 
 export async function deactivateAccessRosterEntry(input: {
@@ -337,10 +534,14 @@ export async function deactivateAccessRosterEntry(input: {
       .set({ memberCount: FieldValue.increment(-1), statsUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
 
-  // End any live sessions immediately so deactivated accounts lose access now.
+  // End any live sessions immediately so deactivated accounts lose access now,
+  // and drop the group grants from the profile so Firestore rules stop serving
+  // this member's group content on the device they are holding.
+  const revokedUids: string[] = [];
   try {
     const authUser = await adminAuth.getUserByPhoneNumber(phoneNumber);
     await revokeAllUserSessions(authUser.uid);
+    revokedUids.push(authUser.uid);
   } catch {
     const usersSnap = await db
       .collection('users')
@@ -349,10 +550,21 @@ export async function deactivateAccessRosterEntry(input: {
       .get();
     if (!usersSnap.empty) {
       await revokeAllUserSessions(usersSnap.docs[0]!.id);
+      revokedUids.push(usersSnap.docs[0]!.id);
     }
   }
 
-  return { id: phoneId, status: 'inactive' as const };
+  await syncAuthProfilesForPhone({
+    phoneNumber,
+    name: typeof data.name === 'string' ? data.name : '',
+    role,
+    groupId: null,
+    assignedGroupIds: [],
+    status: 'inactive',
+    hasPersonalPin: typeof data.pinHash === 'string' && data.pinHash.length > 0,
+  });
+
+  return { id: phoneId, status: 'inactive' as const, revokedUids };
 }
 
 /**

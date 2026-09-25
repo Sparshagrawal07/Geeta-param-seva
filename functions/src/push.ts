@@ -172,6 +172,58 @@ export async function collectUserPushTokens(uid: string, groupId?: string): Prom
   return [...tokens];
 }
 
+/**
+ * Re-mirror every device token into the groups the user belongs to *right now*.
+ * Needed after a group change made outside the app (roster upsert) — otherwise
+ * the old group's index is the only place the device is registered and fan-out
+ * silently stops.
+ */
+export async function reindexUserPushTokens(uid: string): Promise<void> {
+  const [userSnap, devicesSnap] = await Promise.all([
+    db.collection('users').doc(uid).get(),
+    db.collection('users').doc(uid).collection('devices').get(),
+  ]);
+  if (devicesSnap.empty) return;
+
+  const profile = userSnap.data() ?? {};
+  const groupIds = new Set<string>();
+  if (typeof profile.groupId === 'string' && profile.groupId) {
+    groupIds.add(profile.groupId);
+  }
+  if (Array.isArray(profile.assignedGroupIds)) {
+    for (const id of profile.assignedGroupIds) {
+      if (typeof id === 'string' && id) groupIds.add(id);
+    }
+  }
+  if (groupIds.size === 0) return;
+
+  const batch = db.batch();
+  const now = FieldValue.serverTimestamp();
+  for (const device of devicesSnap.docs) {
+    const data = device.data();
+    const token = readToken(data);
+    if (!token) continue;
+    for (const groupId of groupIds) {
+      batch.set(
+        db
+          .collection('groups')
+          .doc(groupId)
+          .collection('push_tokens')
+          .doc(device.id),
+        {
+          uid,
+          deviceId: device.id,
+          token,
+          enabled: data.enabled !== false,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+    }
+  }
+  await batch.commit();
+}
+
 export async function sendUserPracticePush(input: {
   uid: string;
   groupId: string;

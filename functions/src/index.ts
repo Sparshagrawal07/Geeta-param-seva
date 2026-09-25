@@ -40,6 +40,7 @@ import {
   markPracticeItemCompleteCore,
   markAllPracticeCompleteCore,
   sendPracticeReminderCore,
+  syncPracticeAssignmentToAuthUid,
   setMemberPracticeAssignmentCore,
 } from './practice';
 import {
@@ -129,6 +130,7 @@ export const signInWithGroupPin = onCall(callableOptions, async (request) => {
       displayName: login.name || undefined,
     });
     await upsertProfileFromLogin(uid, login);
+    await syncPracticeAssignmentToAuthUid({ uid, phoneNumber });
     await registerSoleSession({ uid, deviceId, platform });
 
     const token = await adminAuth.createCustomToken(uid);
@@ -453,6 +455,8 @@ export const sendPracticeReminder = onCall(callableOptions, async (request) => {
       actorUid: request.auth.uid,
       groupId,
       uid: typeof request.data?.uid === 'string' ? request.data.uid : undefined,
+      phoneNumber:
+        typeof request.data?.phoneNumber === 'string' ? request.data.phoneNumber : undefined,
       remindAllIncomplete: request.data?.remindAllIncomplete === true,
     });
   } catch (error) {
