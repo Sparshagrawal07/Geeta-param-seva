@@ -6,6 +6,8 @@ export const PRACTICE_MARK_ALL_OPERATION = 'practice.mark-all';
 
 export interface PracticeCompletionMutation {
   uid: string;
+  /** Which group's practice this completion belongs to. */
+  groupId: string;
   dateKey: string;
   itemKey?: string;
 }
@@ -24,7 +26,8 @@ export function applyOptimisticPracticeCompletion(
 ): MyPracticeToday {
   if (
     today.practiceDateKey !== mutation.dateKey ||
-    today.assignment?.uid !== mutation.uid
+    today.assignment?.uid !== mutation.uid ||
+    today.groupId !== mutation.groupId
   ) {
     return today;
   }
@@ -62,7 +65,8 @@ export function pendingPracticeItemKeys(
   for (const mutation of mutations) {
     if (
       mutation.payload.uid !== today.assignment?.uid ||
-      mutation.payload.dateKey !== today.practiceDateKey
+      mutation.payload.dateKey !== today.practiceDateKey ||
+      mutation.payload.groupId !== today.groupId
     ) {
       continue;
     }

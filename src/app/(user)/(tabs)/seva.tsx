@@ -3,18 +3,18 @@ import { View } from 'react-native';
 
 import { useGroupFeed, GroupFeedList } from '@/components/feed/group-feed';
 import { SafeBannerAd } from '@/components/ads/safe-banner-ad';
+import { GroupScopeSelector } from '@/components/admin/group-scope-selector';
 import { Screen } from '@/components/layout/screen';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SectionHeader } from '@/components/ui/section-header';
-import { useAuth } from '@/hooks/use-auth';
 import { useLocalPerformanceSpan } from '@/hooks/use-local-performance-span';
+import { useMemberSelectedGroup } from '@/hooks/use-member-selected-group';
 import { LOCAL_PERFORMANCE_BUDGETS } from '@/lib/local-performance';
 import { useLocale } from '@/providers/locale-provider';
 
 export default function UserSevaScreen() {
-  const { profile } = useAuth();
   const { t } = useLocale();
-  const groupId = profile?.groupId ?? null;
+  const { groups, groupId, setGroupId } = useMemberSelectedGroup();
   const feed = useGroupFeed(groupId);
   useLocalPerformanceSpan(
     'screen.seva.cached-ready',
@@ -49,6 +49,14 @@ export default function UserSevaScreen() {
           onRefresh={() => void handleRefresh()}
           header={
             <View className="px-5">
+              {/* Hidden for a single group — a one-option picker is noise, not choice. */}
+              {groups.length > 1 ? (
+                <GroupScopeSelector
+                  groups={groups}
+                  selectedGroupId={groupId}
+                  onSelect={(id) => void setGroupId(id)}
+                />
+              ) : null}
               <SectionHeader
                 title={t('sevaTabTitle')}
                 subtitle={t('sevaTabSubtitle')}

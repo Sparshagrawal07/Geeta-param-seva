@@ -1,4 +1,4 @@
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, type DocumentSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 
 import { getLocalCache } from '@/lib/cache';
@@ -12,8 +12,11 @@ import {
 } from '@/lib/cache/keys';
 import { auth, db, functions } from '@/lib/firebase';
 import {
+  assignmentDocId,
+  legacyPracticeLogDocId,
   normalizePracticeItems,
   practiceDateKey,
+  practiceLogDocId,
   type MemberPracticeAssignment,
   type MyPracticeToday,
   type PracticeAdminOverview,
@@ -80,52 +83,67 @@ function enrichLocal(items: PracticeItem[], completedKeys: Set<string>): Practic
 }
 
 /** Direct Firestore read — avoids callable + Gen2 cost on every home open. */
-export async function getMyPracticeTodayRemote(): Promise<MyPracticeToday> {
+export async function getMyPracticeTodayRemote(groupId: string): Promise<MyPracticeToday> {
   const uid = auth.currentUser?.uid;
   const dateKey = practiceDateKey();
   if (!uid) {
-    return { practiceDateKey: dateKey, assignment: null, items: [] };
+    return { practiceDateKey: dateKey, groupId, assignment: null, items: [] };
+  }
+  if (!groupId) {
+    return { practiceDateKey: dateKey, groupId: '', assignment: null, items: [] };
   }
 
   try {
-    const assignmentSnap = await getDoc(doc(db, 'member_practice_assignments', uid));
-    if (!assignmentSnap.exists()) {
-      return { practiceDateKey: dateKey, assignment: null, items: [] };
+    const { snap: assignmentSnap, legacy } = await readAssignmentDoc(uid, groupId);
+    if (!assignmentSnap) {
+      return { practiceDateKey: dateKey, groupId, assignment: null, items: [] };
     }
     const data = assignmentSnap.data() as Record<string, unknown>;
     const items = normalizePracticeItems(data.items);
-    const groupId = String(data.groupId ?? '');
 
-    // Point reads by known doc ids — no composite index required.
+    // Point reads by known doc ids — no composite index required. The legacy log id
+    // is only consulted for the group the pre-multi-group plan belonged to, so one
+    // group's completion can never be reported as another's.
+    const allowLegacyLogs = legacy;
     const completedKeys = new Set<string>();
     await Promise.all(
       items.map(async (item) => {
-        const logId = `${uid}_${dateKey}_${item.itemKey}`;
-        try {
-          const logSnap = await getDoc(doc(db, 'practice_completion_logs', logId));
-          if (logSnap.exists()) completedKeys.add(item.itemKey);
-        } catch {
-          // Ignore individual log read failures.
+        const ids = [practiceLogDocId(uid, groupId, dateKey, item.itemKey)];
+        if (allowLegacyLogs) {
+          ids.push(legacyPracticeLogDocId(uid, dateKey, item.itemKey));
+        }
+        for (const logId of ids) {
+          try {
+            const logSnap = await getDoc(doc(db, 'practice_completion_logs', logId));
+            if (logSnap.exists()) {
+              completedKeys.add(item.itemKey);
+              return;
+            }
+          } catch {
+            // Ignore individual log read failures.
+          }
         }
       })
     );
 
     return {
       practiceDateKey: dateKey,
+      groupId,
       assignment: { uid, groupId, items },
       items: enrichLocal(items, completedKeys),
     };
   } catch (error) {
     console.warn('[practice] direct today read failed, falling back to callable', error);
     const callable = httpsCallable(functions, 'getMyPracticeToday');
-    const response = await callable({});
+    const response = await callable({ groupId });
     const data = response.data as MyPracticeToday;
     return {
       practiceDateKey: String(data?.practiceDateKey ?? dateKey),
+      groupId,
       assignment: data?.assignment
         ? {
             uid: String(data.assignment.uid ?? ''),
-            groupId: String(data.assignment.groupId ?? ''),
+            groupId: String(data.assignment.groupId ?? groupId),
             items: normalizePracticeItems(data.assignment.items),
           }
         : null,
@@ -141,9 +159,40 @@ export async function getMyPracticeTodayRemote(): Promise<MyPracticeToday> {
   }
 }
 
-export async function getCachedMyPracticeToday(uid: string, dateKey = practiceDateKey()) {
+/**
+ * The member's standing plan for one group.
+ *
+ * Tries the group-scoped doc id first, then the pre-multi-group doc — but only when
+ * that doc is stamped with this group, so a single legacy plan never leaks into the
+ * member's other groups. `legacy` tells the caller which shape answered, because it
+ * also decides whether the old log ids are worth reading.
+ */
+async function readAssignmentDoc(
+  aliasUid: string,
+  groupId: string
+): Promise<{ snap: DocumentSnapshot | null; legacy: boolean }> {
+  const scoped = await getDoc(doc(db, 'member_practice_assignments', assignmentDocId(aliasUid, groupId)));
+  if (scoped.exists()) {
+    return { snap: scoped, legacy: false };
+  }
+
+  const legacySnap = await getDoc(doc(db, 'member_practice_assignments', aliasUid));
+  if (!legacySnap.exists()) {
+    return { snap: null, legacy: false };
+  }
+  if (String(legacySnap.data()?.groupId ?? '') !== groupId) {
+    return { snap: null, legacy: false };
+  }
+  return { snap: legacySnap, legacy: true };
+}
+
+export async function getCachedMyPracticeToday(
+  uid: string,
+  groupId: string,
+  dateKey = practiceDateKey()
+) {
   const cache = await getLocalCache();
-  return cache.get<MyPracticeToday>(todayPracticeCacheKey(dateKey), {
+  return cache.get<MyPracticeToday>(todayPracticeCacheKey(dateKey, groupId), {
     scope: userCacheScope(uid),
   });
 }
@@ -158,28 +207,31 @@ async function listPracticeMutations(uid: string) {
 
 async function storeMyPracticeToday(uid: string, today: MyPracticeToday) {
   const cache = await getLocalCache();
-  await cache.set(todayPracticeCacheKey(today.practiceDateKey), today, {
+  await cache.set(todayPracticeCacheKey(today.practiceDateKey, today.groupId), today, {
     scope: userCacheScope(uid),
     staleForMs: LOCAL_CACHE_POLICY.practiceStaleMs,
     expiresInMs: LOCAL_CACHE_POLICY.practiceExpiresMs,
   });
 }
 
-export function refreshMyPracticeToday(uid: string): Promise<MyPracticeToday> {
+export function refreshMyPracticeToday(uid: string, groupId: string): Promise<MyPracticeToday> {
   if (auth.currentUser?.uid !== uid) return Promise.reject(new Error('AUTH_CHANGED'));
-  const existing = todayRefreshInFlight.get(uid);
+  // Keyed per group: switching groups mid-session must not have the two views
+  // collapse onto one another.
+  const flightKey = `${uid}:${groupId}`;
+  const existing = todayRefreshInFlight.get(flightKey);
   if (existing) return existing;
   const request = (async () => {
-    const remote = await getMyPracticeTodayRemote();
+    const remote = await getMyPracticeTodayRemote(groupId);
     if (auth.currentUser?.uid !== uid) throw new Error('AUTH_CHANGED');
     const pending = await listPracticeMutations(uid);
     const today = applyPendingPracticeMutations(remote, pending);
     await storeMyPracticeToday(uid, today);
     return today;
   })().finally(() => {
-    if (todayRefreshInFlight.get(uid) === request) todayRefreshInFlight.delete(uid);
+    if (todayRefreshInFlight.get(flightKey) === request) todayRefreshInFlight.delete(flightKey);
   });
-  todayRefreshInFlight.set(uid, request);
+  todayRefreshInFlight.set(flightKey, request);
   return request;
 }
 
@@ -197,8 +249,10 @@ export async function queuePracticeCompletion(input: {
 }): Promise<MyPracticeToday> {
   if (auth.currentUser?.uid !== input.uid) throw new Error('AUTH_CHANGED');
   const dateKey = input.today.practiceDateKey;
+  const groupId = input.today.groupId;
   const payload: PracticeCompletionMutation = {
     uid: input.uid,
+    groupId,
     dateKey,
     ...(input.itemKey ? { itemKey: input.itemKey } : {}),
   };
@@ -215,7 +269,8 @@ export async function queuePracticeCompletion(input: {
         .filter(
           (item) =>
             item.operation === PRACTICE_MARK_ONE_OPERATION &&
-            item.payload.dateKey === dateKey
+            item.payload.dateKey === dateKey &&
+            item.payload.groupId === groupId
         )
         .map((item) => cache.deleteMutation(item.id))
     );
@@ -268,9 +323,12 @@ async function replayPracticeOutboxInternal(uid: string): Promise<void> {
         mutation.operation === PRACTICE_MARK_ONE_OPERATION &&
         mutation.payload.itemKey
       ) {
-        await markPracticeItemCompleteRemote(mutation.payload.itemKey);
+        await markPracticeItemCompleteRemote(
+          mutation.payload.itemKey,
+          mutation.payload.groupId
+        );
       } else if (mutation.operation === PRACTICE_MARK_ALL_OPERATION) {
-        await markAllPracticeCompleteRemote();
+        await markAllPracticeCompleteRemote(mutation.payload.groupId);
       } else {
         await cache.deleteMutation(mutation.id);
         continue;
@@ -289,35 +347,39 @@ async function replayPracticeOutboxInternal(uid: string): Promise<void> {
 }
 
 export async function fetchMemberPracticeAssignment(
-  uidOrPhone: string
+  uidOrPhone: string,
+  groupId: string
 ): Promise<MemberPracticeAssignment | null> {
   const uid = uidOrPhone.startsWith('u') ? uidOrPhone : phoneToUid(uidOrPhone);
-  const snap = await getDoc(doc(db, 'member_practice_assignments', uid));
-  if (!snap.exists()) return null;
+  if (!groupId) return null;
+  const { snap } = await readAssignmentDoc(uid, groupId);
+  if (!snap?.exists()) return null;
   const data = snap.data() as Record<string, unknown>;
   return {
     uid,
-    groupId: String(data.groupId ?? ''),
+    groupId,
     items: normalizePracticeItems(data.items),
   };
 }
 
 export { phoneToUid };
 
-export async function markPracticeItemCompleteRemote(itemKey: string) {
+export async function markPracticeItemCompleteRemote(itemKey: string, groupId: string) {
   const callable = httpsCallable(functions, 'markPracticeItemComplete');
-  const response = await callable({ itemKey });
+  const response = await callable({ itemKey, groupId });
   return response.data as {
     logId: string;
+    groupId: string;
     practiceDateKey: string;
     alreadyComplete?: boolean;
   };
 }
 
-export async function markAllPracticeCompleteRemote() {
+export async function markAllPracticeCompleteRemote(groupId: string) {
   const callable = httpsCallable(functions, 'markAllPracticeComplete');
-  const response = await callable({});
+  const response = await callable({ groupId });
   return response.data as {
+    groupId: string;
     practiceDateKey: string;
     completedCount: number;
     alreadyComplete?: boolean;
@@ -329,6 +391,7 @@ export async function setMemberPracticeAssignmentRemote(input: {
   uid?: string;
   phoneNumber?: string;
   items: PracticeItem[];
+  name?: string;
 }) {
   const callable = httpsCallable(functions, 'setMemberPracticeAssignment');
   const response = await callable(input);
@@ -359,6 +422,26 @@ export async function getCachedPracticeAdminOverview(
     adminPracticeCacheKey(groupId, dateKey),
     { scope: groupCacheScope(uid, groupId) }
   );
+}
+
+/**
+ * Drop the cached admin practice overview for today's practice day.
+ *
+ * The entry is keyed by group + practice day and is only ever replaced by a
+ * successful refresh, so a member deactivated on the People tab stays in this
+ * list — for the rest of the practice day, and across cold starts — until
+ * something refetches. Roster writes call this so the next read is a miss and
+ * the screen rebuilds from the server, which is the only place that knows the
+ * member is no longer active.
+ */
+export async function invalidateCachedPracticeAdminOverview(
+  uid: string,
+  groupId: string
+): Promise<void> {
+  const scope = groupCacheScope(uid, groupId);
+  adminPracticeRefreshInFlight.delete(scope);
+  const cache = await getLocalCache();
+  await cache.remove(adminPracticeCacheKey(groupId, practiceDateKey()), scope);
 }
 
 export function refreshCachedPracticeAdminOverview(

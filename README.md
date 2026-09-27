@@ -8,8 +8,36 @@ Built with **Expo Router (SDK 57)**, **React Native**, **Firebase** (Auth custom
 
 ---
 
+## Preview
+
+<p align="center">
+  <img src="preview/hero.png" alt="Geeta Param Seva — project overview" width="100%">
+</p>
+
+---
+
+## Document preview
+
+This README is also published as a designed **14-page A4 PDF**.
+
+<p align="center">
+  <img src="preview/pages.png" alt="Geeta Param Seva README.pdf — all 14 pages" width="100%">
+</p>
+
+A few pages at full size — the complete set lives in [`preview/pages/`](./preview/pages):
+
+| Cover | Architecture | License |
+|:--:|:--:|:--:|
+| <img src="preview/pages/page-1.png" alt="Cover page" width="100%"> | <img src="preview/pages/page-5.png" alt="Architecture page" width="100%"> | <img src="preview/pages/page-13.png" alt="License page" width="100%"> |
+
+**[Open the full PDF](./README.pdf)**
+
+---
+
 ## Table of contents
 
+- [Preview](#preview)
+- [Document preview](#document-preview)
 - [Overview](#overview)
 - [Features](#features)
 - [Architecture](#architecture)
@@ -21,36 +49,16 @@ Built with **Expo Router (SDK 57)**, **React Native**, **Firebase** (Auth custom
 - [Banner ads](#banner-ads)
 - [Legal (GitHub Pages)](#legal-github-pages)
 - [Quality checks](#quality-checks)
+- [Builds (Android)](#builds-android)
 - [License](#license)
 
 ---
 
 ## Overview
 
-```mermaid
-mindmap
-  root((Geeta Param Seva))
-    Members
-      Apply to join
-      Group feed
-      Practice today
-      Gita / Aarti
-      Push alerts
-    Admins
-      Join applications
-      Roster + join PINs
-      Seva posts
-      Practice assign
-      Group tools
-    Seniors
-      All groups
-      Admin roster
-      Global oversight
-    Platform
-      Expo app
-      Firebase
-      AdMob banners (NPA)
-```
+<p align="center">
+  <img src="preview/02-roles.png" alt="Roles and surfaces by audience" width="100%">
+</p>
 
 Geeta Param Seva is a **moderated community**: anyone may download the app and submit a join application (name + phone). Community features require admin approval, roster placement, and sign-in with phone + PIN.
 
@@ -68,81 +76,23 @@ Geeta Param Seva is a **moderated community**: anyone may download the app and s
 | **Ads** | Member-only non-personalized banner ads (Remote Config kill switch); never on reading / auth screens; no ATT / IDFA tracking |
 | **Admin** | Join applications, roster, join PIN rotation, content publishing, practice overview |
 
-```mermaid
-flowchart LR
-  subgraph Member["Member experience"]
-    A[Sign in] --> B[Home / practice]
-    B --> C[Seva feed]
-    B --> D[Gita / Aarti]
-    B --> E[Profile / Settings]
-  end
-
-  subgraph Admin["Admin experience"]
-    F[Sign in + personal PIN] --> G[Dashboard]
-    G --> H[Members / roster]
-    G --> I[Create post]
-    G --> J[Practice tools]
-  end
-
-  H -.->|join PIN| A
-```
+<p align="center">
+  <img src="preview/04-journeys.png" alt="Member and admin journeys" width="100%">
+</p>
 
 ---
 
 ## Architecture
 
-```mermaid
-flowchart TB
-  subgraph Client["Expo app · src/"]
-    UI["expo-router screens<br/>(auth) (user) (admin) legal"]
-    Prov["Providers<br/>auth · locale · theme · ads · notifications"]
-    Svc["Services<br/>feed · roster · practice · account"]
-    UI --> Prov --> Svc
-  end
-
-  subgraph Firebase["Firebase · asia-south1"]
-    Auth["Auth<br/>custom tokens"]
-    FS[(Firestore)]
-    CF["Cloud Functions<br/>pin-auth · roster · practice · push"]
-    RC["Remote Config<br/>ads_* keys"]
-  end
-
-  subgraph Native["Native binaries · EAS"]
-    AdMob["Google Mobile Ads<br/>banner units"]
-    Push["Expo Notifications<br/>FCM / APNs"]
-  end
-
-  Svc -->|HTTPS callable| CF
-  Svc --> Auth
-  Svc --> FS
-  Prov --> RC
-  Prov --> AdMob
-  Prov --> Push
-  CF --> FS
-  CF --> Push
-```
+<p align="center">
+  <img src="preview/03-architecture.png" alt="Three-tier architecture" width="100%">
+</p>
 
 ### Repo map
 
-```mermaid
-flowchart LR
-  subgraph Root
-    app["app.config.js"]
-    legalSrc["src/lib/legal-content.ts"]
-    styles["website/styles.css"]
-    docs["docs/ · generated Pages"]
-    fn["functions/ · Cloud Functions"]
-    src["src/ · app · components · services"]
-    scripts["scripts/ · seed & tooling"]
-  end
-
-  app --> src
-  legalSrc --> docs
-  styles --> docs
-  src --> fn
-  scripts --> fn
-  docs -.->|privacy + terms| Store["Play / App Store listings"]
-```
+<p align="center">
+  <img src="preview/06-repo-map.png" alt="Repository map" width="100%">
+</p>
 
 | Path | Role |
 |------|------|
@@ -159,24 +109,9 @@ flowchart LR
 
 ## Auth & roles
 
-```mermaid
-sequenceDiagram
-  participant U as User
-  participant App as Expo app
-  participant CF as signInWithGroupPin
-  participant FS as Firestore
-
-  U->>App: Apply (name + phone) or Sign in (phone + PIN)
-  App->>CF: submitJoinApplication or signInWithGroupPin
-  CF->>FS: join_applications / roster / senior_admins + pin_hashes
-  CF-->>App: ok or Firebase custom token
-  App->>App: sole-device session + profile (after sign-in)
-  alt Member
-    App-->>U: (user) home / seva / practice
-  else Admin / Senior
-    App-->>U: (admin) dashboard
-  end
-```
+<p align="center">
+  <img src="preview/05-auth-flow.png" alt="Sign-in flow" width="100%">
+</p>
 
 | Role | Access |
 |------|--------|
@@ -195,6 +130,10 @@ Seniors are seeded only via Admin SDK scripts — never created inside the app U
 - **Backend:** Firebase Auth, Firestore, Cloud Functions (`asia-south1`), Remote Config
 - **Monetization:** `react-native-google-mobile-ads` (banners only)
 - **Tooling:** TypeScript, Vitest, EAS Build, Firebase CLI
+
+<p align="center">
+  <img src="preview/07-tech-stack.png" alt="Tech stack — client, backend, monetization, tooling" width="100%">
+</p>
 
 Expo versioned docs for this project’s generation: [docs.expo.dev/versions/v54.0.0](https://docs.expo.dev/versions/v54.0.0/) (see also current SDK notes in `AGENTS.md`).
 
@@ -255,16 +194,9 @@ npm run android
 npm run ios
 ```
 
-```mermaid
-flowchart LR
-  Dev[Developer] --> Expo[expo start]
-  Expo --> Metro[Metro bundler]
-  Metro --> Device[Simulator / device]
-  Device --> FB[Firebase project]
-  Device -.->|dev client / EAS| Ads[AdMob SDK]
-```
-
-Custom notification sound and production AdMob require a **development or EAS build** (not Expo Go).
+<p align="center">
+  <img src="preview/08-dev-loop.png" alt="Local development loop" width="100%">
+</p>
 
 ---
 

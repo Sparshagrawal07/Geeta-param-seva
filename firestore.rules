@@ -28,10 +28,38 @@ service cloud.firestore {
       return isSeniorAdmin() || isGroupAdmin(groupId);
     }
 
+    /**
+     * Is the signed-in member part of this group?
+     *
+     * Accepts BOTH storage shapes on purpose: `groupIds` (multi-group, the source
+     * of truth) and the older scalar `groupId` (the primary group). A profile
+     * written before the backfill has only the scalar one, and a rule that ignored
+     * it would lock those members out of their own group content mid-rollout.
+     * Admins are deliberately excluded — they manage groups, they don't belong to
+     * them, and `assignedGroupIds` is what grants them access.
+     */
+    function isMemberOfGroup(groupId) {
+      return isSignedIn()
+        && userData().role == 'user'
+        && (
+          (userData().groupId is string && userData().groupId == groupId)
+          || (userData().groupIds is list && groupId in userData().groupIds)
+        );
+    }
+
+    /** Two members may see each other's profile when they share any group. */
+    function sharesGroupWith(target) {
+      return userData().groupId != null
+        && (
+          target.groupId == userData().groupId
+          || (target.groupIds is list && userData().groupId in target.groupIds)
+        );
+    }
+
     function canReadGroupContent(groupId) {
       return isSeniorAdmin()
         || isGroupAdmin(groupId)
-        || (isSignedIn() && userData().role == 'user' && userData().groupId == groupId);
+        || isMemberOfGroup(groupId);
     }
 
     function pollGroupId(pollId) {
@@ -42,22 +70,18 @@ service cloud.firestore {
       let groupId = pollGroupId(pollId);
       return isSignedIn()
         && userData().role == 'user'
-        && userData().groupId == groupId;
+        && isMemberOfGroup(groupId);
     }
 
     function canReadGroup(groupId) {
       return canReadGroupContent(groupId);
     }
 
-    function sharesGroupWith(target) {
-      return userData().groupId != null
-        && target.groupId == userData().groupId;
-    }
-
     function adminManagesTarget(target) {
       return userData().role == 'admin'
         && (
           (target.groupId != null && target.groupId in userData().assignedGroupIds)
+          || (target.groupIds is list && target.groupIds.hasAny(userData().assignedGroupIds))
           || (target.role == 'admin' && target.assignedGroupIds.hasAny(userData().assignedGroupIds))
           || target.role == 'senior_admin'
         );
@@ -82,11 +106,17 @@ service cloud.firestore {
         && request.auth.uid == userId
         && request.resource.data.phoneNumber == resource.data.phoneNumber
         && !('role' in request.resource.data.diff(resource.data).affectedKeys())
+        // `groupIds` and `memberKey` are privilege-bearing: a member who could set
+        // their own `groupIds` would grant themselves any group in the app, and one
+        // who could set `memberKey` could read another member's practice assignment.
         && !('groupId' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('groupIds' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('memberKey' in request.resource.data.diff(resource.data).affectedKeys())
         && !('assignedGroupIds' in request.resource.data.diff(resource.data).affectedKeys())
         && !('whitelistKey' in request.resource.data.diff(resource.data).affectedKeys())
         && !('seniorAdminKey' in request.resource.data.diff(resource.data).affectedKeys())
         && !('hasPersonalPin' in request.resource.data.diff(resource.data).affectedKeys())
+        && !('rosterStatus' in request.resource.data.diff(resource.data).affectedKeys())
         && !('activeSessionId' in request.resource.data.diff(resource.data).affectedKeys())
         && !('activeSessionUpdatedAt' in request.resource.data.diff(resource.data).affectedKeys());
     }
@@ -98,8 +128,12 @@ service cloud.firestore {
           && userData().role == 'admin'
           && (
             (resource.data.role == 'user'
-              && resource.data.groupId != null
-              && resource.data.groupId in userData().assignedGroupIds)
+              && (
+                (resource.data.groupId != null
+                  && resource.data.groupId in userData().assignedGroupIds)
+                || (resource.data.groupIds is list
+                  && resource.data.groupIds.hasAny(userData().assignedGroupIds))
+              )
             || (resource.data.role == 'admin'
               && resource.data.assignedGroupIds.hasAny(userData().assignedGroupIds))
           )
@@ -140,8 +174,7 @@ service cloud.firestore {
         || (
           // Voters may bump today's poll response counter for their own group only.
           isSignedIn()
-          && userData().role == 'user'
-          && userData().groupId == groupId
+          && isMemberOfGroup(groupId)
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['todaysPollResponseCount', 'statsUpdatedAt'])
         );
@@ -350,10 +383,22 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    match /member_practice_assignments/{uid} {
+    /**
+     * Standing practice assignments, one doc per (member alias, group).
+     *
+     * The doc id is `{alias}_{groupId}`, so it can no longer be compared to the
+     * caller's uid — that check silently stopped matching the moment a second
+     * group existed, which would have left the member's own practice unreadable.
+     * Ownership is now decided by the doc's own `uid` / `memberKey` fields, with
+     * `memberKey` mirroring the phone-keyed id onto the profile at sign-in.
+     */
+    match /member_practice_assignments/{assignmentId} {
       allow read: if isSignedIn()
         && (
-          request.auth.uid == uid
+          resource.data.uid == request.auth.uid
+          || (resource.data.memberKey is string
+            && userData().memberKey is string
+            && resource.data.memberKey == userData().memberKey)
           || canManageGroup(resource.data.groupId)
         );
       allow create, update, delete: if false;

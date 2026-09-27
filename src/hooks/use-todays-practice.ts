@@ -14,32 +14,35 @@ import {
   replayPracticeOutbox,
 } from '@/services/practice';
 
-function emptyToday(): MyPracticeToday {
-  return { practiceDateKey: practiceDateKey(), assignment: null, items: [] };
+function emptyToday(groupId: string): MyPracticeToday {
+  return { practiceDateKey: practiceDateKey(), groupId, assignment: null, items: [] };
 }
 
-export function useTodaysPractice(enabled = true) {
+export function useTodaysPractice(groupId: string | null, enabled = true) {
   const { profile, loading: authLoading } = useAuth();
   const { t } = useLocale();
   const uid = profile?.uid ?? null;
-  const [today, setToday] = useState<MyPracticeToday>(emptyToday);
+  const [today, setToday] = useState<MyPracticeToday>(() => emptyToday(groupId ?? ''));
   const [pendingItemKeys, setPendingItemKeys] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const requestIdRef = useRef(0);
   const taskId = useId();
 
-  const updatePending = useCallback(async (nextToday: MyPracticeToday) => {
-    if (!uid) {
-      setPendingItemKeys(new Set());
-      return;
-    }
-    setPendingItemKeys(await getPendingPracticeItemKeys(uid, nextToday));
-  }, [uid]);
+  const updatePending = useCallback(
+    async (nextToday: MyPracticeToday) => {
+      if (!uid) {
+        setPendingItemKeys(new Set());
+        return;
+      }
+      setPendingItemKeys(await getPendingPracticeItemKeys(uid, nextToday));
+    },
+    [uid]
+  );
 
   const refresh = useCallback(
     async (options?: { silent?: boolean }) => {
-      if (!uid || !enabled || authLoading) {
+      if (!uid || !groupId || !enabled || authLoading) {
         setLoading(false);
         return;
       }
@@ -48,7 +51,7 @@ export function useTodaysPractice(enabled = true) {
         if (!options?.silent) setLoading(true);
         setError('');
         await replayPracticeOutbox(uid);
-        const nextToday = await refreshMyPracticeToday(uid);
+        const nextToday = await refreshMyPracticeToday(uid, groupId);
         if (requestId !== requestIdRef.current) return;
         setToday(nextToday);
         await updatePending(nextToday);
@@ -58,12 +61,12 @@ export function useTodaysPractice(enabled = true) {
         if (requestId === requestIdRef.current) setLoading(false);
       }
     },
-    [authLoading, enabled, t, uid, updatePending]
+    [authLoading, enabled, groupId, t, uid, updatePending]
   );
 
   useEffect(() => {
     const requestId = ++requestIdRef.current;
-    if (!uid || !enabled || authLoading) {
+    if (!uid || !groupId || !enabled || authLoading) {
       if (!authLoading) {
         void Promise.resolve().then(() => {
           if (requestId === requestIdRef.current) setLoading(false);
@@ -75,11 +78,11 @@ export function useTodaysPractice(enabled = true) {
     void Promise.resolve()
       .then(() => {
         if (requestId !== requestIdRef.current) return null;
-        setToday(emptyToday());
+        setToday(emptyToday(groupId));
         setPendingItemKeys(new Set());
         setLoading(true);
         setError('');
-        return getCachedMyPracticeToday(uid);
+        return getCachedMyPracticeToday(uid, groupId);
       })
       .then(async (cached) => {
         if (requestId !== requestIdRef.current) return;
@@ -90,7 +93,7 @@ export function useTodaysPractice(enabled = true) {
         }
         if (shouldRefreshCache(cached?.freshness ?? null)) {
           await replayPracticeOutbox(uid);
-          const nextToday = await refreshMyPracticeToday(uid);
+          const nextToday = await refreshMyPracticeToday(uid, groupId);
           if (requestId !== requestIdRef.current) return;
           setToday(nextToday);
           await updatePending(nextToday);
@@ -102,22 +105,23 @@ export function useTodaysPractice(enabled = true) {
       .finally(() => {
         if (requestId === requestIdRef.current) setLoading(false);
       });
-  }, [authLoading, enabled, t, uid, updatePending]);
+  }, [authLoading, enabled, groupId, t, uid, updatePending]);
 
   useEffect(() => {
-    if (!uid || !enabled) return;
+    if (!uid || !groupId || !enabled) return;
     return registerRefreshTask(
-      `today-practice:${taskId}:${uid}`,
+      `today-practice:${taskId}:${uid}:${groupId}`,
       () => refresh({ silent: true }),
       { cooldownMs: LOCAL_CACHE_POLICY.refreshCooldownMs }
     );
-  }, [enabled, refresh, taskId, uid]);
+  }, [enabled, groupId, refresh, taskId, uid]);
 
   const markComplete = useCallback(
     async (itemKey?: string) => {
-      if (!uid) return;
+      if (!uid || !groupId) return;
       const mutation = {
         uid,
+        groupId,
         dateKey: today.practiceDateKey,
         ...(itemKey ? { itemKey } : {}),
       };
@@ -146,7 +150,7 @@ export function useTodaysPractice(enabled = true) {
         throw caught;
       }
     },
-    [today, uid, updatePending]
+    [groupId, today, uid, updatePending]
   );
 
   return {

@@ -2,12 +2,19 @@
  * Standing Adhyay / Aarti practice assignments + noon-IST daily completion logs.
  */
 
-import { FieldValue, type Query } from 'firebase-admin/firestore';
+import {
+  FieldValue,
+  type DocumentData,
+  type DocumentReference,
+  type Query,
+} from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 
 import { db } from './firebase-admin';
+import { readGroupIds } from './group-membership';
 import {
   findAuthUidByPhone,
+  phoneToRosterId,
   phoneToUid,
   resolveMemberAliases,
   type MemberAliases,
@@ -61,8 +68,37 @@ export function practiceDateKey(now: Date = new Date(), timeZone = PRACTICE_TIME
   return zonedDateKey(now, timeZone);
 }
 
-export function practiceLogDocId(uid: string, dateKey: string, itemKey: string): string {
+/**
+ * Completion log id, per (member, group, day, item).
+ *
+ * The group is part of the id because a member in two groups practises separately:
+ * without it, marking Adhyay 1 done in one group would tick it off in the other.
+ */
+export function practiceLogDocId(
+  uid: string,
+  groupId: string,
+  dateKey: string,
+  itemKey: string
+): string {
+  return `${uid}_${groupId}_${dateKey}_${itemKey}`;
+}
+
+/** Pre-multi-group log id. Read as a fallback so old history still shows. */
+export function legacyPracticeLogDocId(uid: string, dateKey: string, itemKey: string): string {
   return `${uid}_${dateKey}_${itemKey}`;
+}
+
+/** Standing assignment id, per (member, group) — one plan per group. */
+export function assignmentDocId(aliasUid: string, groupId: string): string {
+  return `${aliasUid}_${groupId}`;
+}
+
+/**
+ * Pre-multi-group assignment id: a single plan for the whole member, stamped with
+ * the group it belonged to. Read as a fallback for that group only.
+ */
+export function legacyAssignmentDocId(aliasUid: string): string {
+  return aliasUid;
 }
 
 export function normalizePracticeItems(raw: unknown): PracticeItem[] {
@@ -152,26 +188,49 @@ type AssignmentRecord = {
   items: PracticeItem[];
 };
 
-async function loadAssignmentForAliases(aliases: MemberAliases): Promise<AssignmentRecord | null> {
+async function loadAssignmentForAliases(
+  aliases: MemberAliases,
+  groupId: string
+): Promise<AssignmentRecord | null> {
   const order = aliasReadOrder(aliases);
-  if (order.length === 0) return null;
+  if (order.length === 0 || !groupId) return null;
 
-  const snaps = await db.getAll(...order.map((uid) => db.collection(COLLECTION_ASSIGNMENTS).doc(uid)));
-  const found: AssignmentRecord[] = snaps
-    .filter((snap) => snap.exists)
-    .map((snap) => {
-      const data = (snap.data() ?? {}) as Record<string, unknown>;
-      return { uid: snap.id, data, items: normalizePracticeItems(data.items) };
-    });
+  const toRecord = (snap: { id: string; exists: boolean; data: () => DocumentData | undefined }) =>
+    snap.exists
+      ? {
+          uid: snap.id,
+          data: (snap.data() ?? {}) as Record<string, unknown>,
+          items: normalizePracticeItems(snap.data()?.items),
+        }
+      : null;
 
-  return found.find((entry) => entry.items.length > 0) ?? found[0] ?? null;
+  // Group-scoped docs first — this is the shape every new write uses.
+  const scopedSnaps = await db.getAll(
+    ...order.map((uid) => db.collection(COLLECTION_ASSIGNMENTS).doc(assignmentDocId(uid, groupId)))
+  );
+  const scoped = scopedSnaps.map(toRecord).filter((entry): entry is AssignmentRecord => entry !== null);
+  const scopedHit = scoped.find((entry) => entry.items.length > 0) ?? scoped[0] ?? null;
+  if (scopedHit) return scopedHit;
+
+  // Fallback to the pre-multi-group doc, but only for the group it was stamped
+  // with. Without that check a single legacy plan would show up in every group the
+  // member belongs to, which is exactly the double-count this scheme exists to stop.
+  const legacySnaps = await db.getAll(
+    ...order.map((uid) => db.collection(COLLECTION_ASSIGNMENTS).doc(legacyAssignmentDocId(uid)))
+  );
+  const legacy = legacySnaps
+    .map(toRecord)
+    .filter((entry): entry is AssignmentRecord => entry !== null)
+    .filter((entry) => String(entry.data.groupId ?? '') === groupId);
+
+  return legacy.find((entry) => entry.items.length > 0) ?? legacy[0] ?? null;
 }
 
 /**
- * Persist a standing assignment under *every* alias id.
+ * Persist a standing assignment under *every* alias id, for one group.
  *
- * The member's home screen reads `member_practice_assignments/{authUid}` straight
- * from Firestore, so a write that only lands on the phone-keyed doc stays
+ * The member's home screen reads `member_practice_assignments/{authUid}_{groupId}`
+ * straight from Firestore, so a write that only lands on the phone-keyed doc stays
  * invisible until the next sign-in. Writing all aliases is what makes an admin's
  * change show up straight away, with no new app build required.
  */
@@ -180,21 +239,26 @@ async function writeAssignmentDocs(input: {
   groupId: string;
   items: PracticeItem[];
   actorUid: string;
+  name?: string;
 }) {
   const { aliases, groupId, items, actorUid } = input;
   const memberKey = aliases.memberKey ?? phoneToUid(aliases.phoneNumber ?? '');
   const batch = db.batch();
   for (const uid of aliasReadOrder(aliases)) {
     batch.set(
-      db.collection(COLLECTION_ASSIGNMENTS).doc(uid),
+      db.collection(COLLECTION_ASSIGNMENTS).doc(assignmentDocId(uid, groupId)),
       {
-        uid,
+        uid: assignmentDocId(uid, groupId),
         memberKey,
         // Recorded so the admin screens can address notifications and push at the
         // real account without a users scan or an Auth round trip.
         authUid: aliases.authUid && aliases.authUid !== uid ? aliases.authUid : null,
         groupId,
+        groupIds: [groupId],
         phoneNumber: aliases.phoneNumber,
+        // Carried on the doc so a member removed from the group can still be shown
+        // by name in that group's monthly report, which keeps their history.
+        name: input.name ?? null,
         items,
         updatedAt: FieldValue.serverTimestamp(),
         updatedBy: actorUid,
@@ -249,28 +313,106 @@ async function notifyPracticeAssignmentChanged(input: {
   }
 }
 
-/** Copy the phone-keyed assignment onto the Auth uid after the first sign-in. */
+/**
+ * Copy the phone-keyed assignment onto the Auth uid after the first sign-in, for
+ * every group the member belongs to.
+ *
+ * This doubles as the assignment migration: a pre-multi-group doc (id = the alias
+ * id, stamped with one `groupId`) is copied to the new `{alias}_{groupId}` id the
+ * first time its owner signs in, so no separate backfill job is needed and the
+ * legacy doc is left untouched as a rollback path.
+ */
 export async function syncPracticeAssignmentToAuthUid(input: { uid: string; phoneNumber: string }) {
   const uid = input.uid.trim();
   const phoneNumber = input.phoneNumber.trim();
   if (!uid || !phoneNumber) return;
 
   const memberKey = phoneToUid(phoneNumber);
-  const source = await db.collection(COLLECTION_ASSIGNMENTS).doc(memberKey).get();
-  if (!source.exists) return;
-  const items = normalizePracticeItems(source.data()?.items);
-  if (items.length === 0) return;
+  const groupIds = await loadMemberGroupIds(uid, phoneNumber);
+  if (groupIds.length === 0) return;
 
-  const dest = await db.collection(COLLECTION_ASSIGNMENTS).doc(uid).get();
-  const destItems = normalizePracticeItems(dest.data()?.items);
-  if (destItems.length > 0 && sameItems(destItems, items)) return;
+  for (const groupId of groupIds) {
+    const destRef = db.collection(COLLECTION_ASSIGNMENTS).doc(assignmentDocId(uid, groupId));
+    const destSnap = await destRef.get();
+    const destItems = normalizePracticeItems(destSnap.data()?.items);
+    if (destItems.length > 0) continue;
 
-  await writeAssignmentDocs({
-    aliases: { uid, memberKey, authUid: uid, phoneNumber, uids: [uid, memberKey] },
-    groupId: String(source.data()?.groupId ?? ''),
-    items,
-    actorUid: '',
-  });
+    const sourceRef = db
+      .collection(COLLECTION_ASSIGNMENTS)
+      .doc(assignmentDocId(memberKey, groupId));
+    const sourceSnap = await sourceRef.get();
+    let items = normalizePracticeItems(sourceSnap.data()?.items);
+
+    if (items.length === 0) {
+      // Not migrated yet — read the pre-multi-group doc, but only if it belongs to
+      // this group, so one legacy plan never leaks into the member's other groups.
+      const legacySnap = await db
+        .collection(COLLECTION_ASSIGNMENTS)
+        .doc(legacyAssignmentDocId(memberKey))
+        .get();
+      if (String(legacySnap.data()?.groupId ?? '') === groupId) {
+        items = normalizePracticeItems(legacySnap.data()?.items);
+      }
+    }
+    if (items.length === 0) continue;
+
+    await writeAssignmentDocs({
+      aliases: { uid, memberKey, authUid: uid, phoneNumber, uids: [uid, memberKey] },
+      groupId,
+      items,
+      actorUid: '',
+      name: typeof sourceSnap.data()?.name === 'string' ? sourceSnap.data()?.name : undefined,
+    });
+  }
+}
+
+/**
+ * The groups a member belongs to, from their profile, falling back to the roster.
+ * The profile is preferred because it is what the client and the rules also read.
+ */
+async function loadMemberGroupIds(uid: string, phoneNumber: string): Promise<string[]> {
+  try {
+    const snap = await db.collection(COLLECTION_USERS).doc(uid).get();
+    const fromProfile = readGroupIds(snap.data());
+    if (fromProfile.length > 0) return fromProfile;
+  } catch (error) {
+    console.warn('practice_group_lookup_failed', { uid, error });
+  }
+
+  try {
+    const roster = await db.collection('access_roster').doc(phoneToRosterId(phoneNumber)).get();
+    return readGroupIds(roster.data());
+  } catch (error) {
+    console.warn('practice_roster_group_lookup_failed', { phoneNumber, error });
+    return [];
+  }
+}
+
+/**
+ * Reject a member-supplied `groupId` they are not a member of.
+ *
+ * With one group per member this was implicit. Now that a member carries a list of
+ * groups, `groupId` arrives from the client, so without this check a member could
+ * read another group's practice, tick off items they were never assigned, and
+ * write completions into a report they have nothing to do with.
+ */
+async function assertMemberBelongsToGroup(uid: string, groupId: string): Promise<void> {
+  if (!groupId) {
+    throw new HttpsError('invalid-argument', 'Group is required.');
+  }
+  const snap = await db.collection(COLLECTION_USERS).doc(uid).get();
+  const data = snap.data();
+  if (!data) {
+    throw new HttpsError('permission-denied', 'Not allowed.');
+  }
+  // An inactive member keeps no group grants at all.
+  if (data.rosterStatus === 'inactive') {
+    throw new HttpsError('permission-denied', 'This account is inactive.');
+  }
+  const groupIds = readGroupIds(data);
+  if (!groupIds.includes(groupId)) {
+    throw new HttpsError('permission-denied', 'You are not a member of this group.');
+  }
 }
 
 const CHAPTER_TITLE_FALLBACK: Record<number, { titleEn: string; titleHi: string }> = {
@@ -367,10 +509,21 @@ function enrichItems(
   });
 }
 
-async function loadCompletedKeys(uid: string, dateKey: string): Promise<Set<string>> {
+/**
+ * Completed item keys for one group on one practice day.
+ *
+ * `groupId` is part of the query, not just the doc id: a member practises each
+ * group separately, so Group 1's Adhyay 1 must not tick off Group 7's.
+ */
+async function loadCompletedKeys(
+  uid: string,
+  groupId: string,
+  dateKey: string
+): Promise<Set<string>> {
   const snap = await db
     .collection(COLLECTION_LOGS)
     .where('uid', '==', uid)
+    .where('groupId', '==', groupId)
     .where('practiceDateKey', '==', dateKey)
     .get();
   const keys = new Set<string>();
@@ -381,14 +534,18 @@ async function loadCompletedKeys(uid: string, dateKey: string): Promise<Set<stri
   return keys;
 }
 
-async function loadCompletedKeysForUids(uids: string[], dateKey: string): Promise<Set<string>> {
+async function loadCompletedKeysForUids(
+  uids: string[],
+  groupId: string,
+  dateKey: string
+): Promise<Set<string>> {
   const unique = [...new Set(uids)];
   if (unique.length === 0) return new Set();
 
   const keys = new Set<string>();
   await Promise.all(
     unique.map(async (uid) => {
-      for (const key of await loadCompletedKeys(uid, dateKey)) keys.add(key);
+      for (const key of await loadCompletedKeys(uid, groupId, dateKey)) keys.add(key);
     })
   );
   return keys;
@@ -400,6 +557,7 @@ export async function setMemberPracticeAssignmentCore(input: {
   phoneNumber?: string;
   groupId: string;
   items: unknown;
+  name?: string;
 }) {
   const groupId = input.groupId.trim();
   if (!groupId) {
@@ -433,10 +591,16 @@ export async function setMemberPracticeAssignmentCore(input: {
     throw new HttpsError('not-found', 'Group not found.');
   }
 
-  const previous = await loadAssignmentForAliases(aliases);
+  const previous = await loadAssignmentForAliases(aliases, groupId);
   const changed = !previous || !sameItems(previous.items, items);
 
-  await writeAssignmentDocs({ aliases, groupId, items, actorUid: input.actorUid });
+  await writeAssignmentDocs({
+    aliases,
+    groupId,
+    items,
+    actorUid: input.actorUid,
+    name: input.name,
+  });
 
   if (changed) {
     await notifyPracticeAssignmentChanged({ aliases, groupId, items });
@@ -452,81 +616,140 @@ export async function setMemberPracticeAssignmentCore(input: {
 }
 
 /**
- * Re-stamp a member's standing assignment (and today's completions) after they
- * are moved to another group by a roster edit. Without this the new group's
- * practice screen shows "no assignment" for a member who already has one, which
- * reads as the admin's change having silently failed.
+ * Drop a member's standing assignment for the groups they have just left.
  *
- * History before the move intentionally keeps the old `groupId`, so past days
- * stay in the monthly report of the group they were actually practised in.
+ * Only the assignment is removed. Their *completion logs are deliberately left
+ * alone*: history stays filed under the group it was practised in, so the monthly
+ * report of a group they used to belong to keeps showing their row and their
+ * days. Reinstating them later re-uses the same history rather than starting over.
+ *
+ * This replaces the old "move member between groups" re-stamp, which only made
+ * sense when a member had exactly one group.
  */
-export async function reassignMemberPracticeGroup(input: {
+export async function pruneMemberPracticeGroups(input: {
   phoneNumber: string;
-  groupId: string | null;
+  groupIds: string[];
   actorUid: string;
 }) {
+  const groupIds = input.groupIds.filter(Boolean);
+  if (groupIds.length === 0) return { pruned: [] as string[] };
+
   const aliases = await resolveMemberAliases({ phoneNumber: input.phoneNumber });
-  if (aliases.uids.length === 0) return { moved: false, groupId: input.groupId };
+  if (aliases.uids.length === 0) return { pruned: [] as string[] };
 
-  const existing = await loadAssignmentForAliases(aliases);
-  if (!existing || existing.items.length === 0) {
-    return { moved: false, groupId: input.groupId };
+  // Read before deleting: the Admin SDK's `delete` only takes a lastUpdateTime
+  // precondition, and a batch aborts entirely if any doc is already gone. Skipping
+  // missing docs up front makes this safe to re-run.
+  const refs: DocumentReference[] = [];
+  for (const groupId of groupIds) {
+    for (const aliasUid of aliasReadOrder(aliases)) {
+      refs.push(db.collection(COLLECTION_ASSIGNMENTS).doc(assignmentDocId(aliasUid, groupId)));
+    }
   }
+  if (refs.length === 0) return { pruned: [] as string[] };
 
-  const nextGroupId = input.groupId ?? '';
-  const previousGroupId = String(existing.data.groupId ?? '');
-  if (previousGroupId === nextGroupId) {
-    return { moved: false, groupId: nextGroupId };
-  }
+  const snaps = await db.getAll(...refs);
+  const existing = snaps.filter((snap) => snap.exists);
+  if (existing.length === 0) return { pruned: [] as string[] };
 
   const batch = db.batch();
-  for (const uid of aliasReadOrder(aliases)) {
-    batch.set(
-      db.collection(COLLECTION_ASSIGNMENTS).doc(uid),
-      {
-        groupId: nextGroupId,
-        updatedAt: FieldValue.serverTimestamp(),
-        updatedBy: input.actorUid,
-      },
-      { merge: true }
-    );
+  for (const snap of existing) {
+    batch.delete(snap.ref);
   }
-
-  // Today's rows only — the live admin overview is what the move has to fix.
-  const dateKey = practiceDateKey();
-  const todayLogs = await tryQueryDocs(
-    db
-      .collection(COLLECTION_LOGS)
-      .where('groupId', '==', previousGroupId)
-      .where('practiceDateKey', '==', dateKey)
-  );
-  for (const doc of todayLogs ?? []) {
-    const data = (doc.data() ?? {}) as Record<string, unknown>;
-    if (!logIdentityKeys(data).some((key) => aliases.uids.includes(key))) continue;
-    batch.set(doc.ref, { groupId: nextGroupId }, { merge: true });
-  }
-
   await batch.commit();
-  return { moved: true, groupId: nextGroupId, from: previousGroupId };
+
+  return { pruned: groupIds };
 }
 
-export async function getMyPracticeTodayCore(input: { uid: string }) {
+/**
+ * Carry a member's standing practice from the groups they just left to the groups
+ * they just joined.
+ *
+ * Without this, moving a member between groups would silently drop the plan they
+ * had already been given. A joined group only receives a plan if it has none yet,
+ * so an admin who has already assigned a fresh plan for the new group keeps it.
+ * Completion history is untouched — it stays with the group it happened in.
+ */
+export async function carryMemberPracticeGroups(input: {
+  phoneNumber: string;
+  fromGroupIds: string[];
+  toGroupIds: string[];
+  actorUid: string;
+}) {
+  const from = input.fromGroupIds.filter(Boolean);
+  const to = input.toGroupIds.filter(Boolean);
+  if (from.length === 0 || to.length === 0) return { carried: [] as string[] };
+
+  const aliases = await resolveMemberAliases({ phoneNumber: input.phoneNumber });
+  if (aliases.uids.length === 0) return { carried: [] as string[] };
+
+  const readOrder = aliasReadOrder(aliases);
+  // Exact doc ids per group — matching on a suffix would confuse group `a_g` with
+  // group `g`.
+  const groupDocIds = (groupIds: string[]) =>
+    new Map(
+      groupIds.flatMap((groupId) =>
+        readOrder.map((aliasUid) => [assignmentDocId(aliasUid, groupId), groupId] as const)
+      )
+    );
+
+  const fromDocIds = groupDocIds(from);
+  const toDocIds = groupDocIds(to);
+  const [fromSnaps, toSnaps] = await Promise.all([
+    db.getAll(...[...fromDocIds.keys()].map((id) => db.collection(COLLECTION_ASSIGNMENTS).doc(id))),
+    db.getAll(...[...toDocIds.keys()].map((id) => db.collection(COLLECTION_ASSIGNMENTS).doc(id))),
+  ]);
+
+  // The first leaving group that still has a plan is the one to carry forward.
+  const carriedItems = from
+    .flatMap((groupId) =>
+      fromSnaps.filter(
+        (snap) => snap.exists && fromDocIds.get(snap.ref.id) === groupId
+      )
+    )
+    .map((snap) => (snap.data() as { items?: unknown }).items)
+    .find((items) => Array.isArray(items) && items.length > 0);
+  if (!carriedItems) return { carried: [] as string[] };
+
+  const carried: string[] = [];
+  for (const groupId of to) {
+    const alreadyPlanned = toSnaps.some(
+      (snap) => snap.exists && toDocIds.get(snap.ref.id) === groupId
+    );
+    if (alreadyPlanned) continue;
+
+    await setMemberPracticeAssignmentCore({
+      actorUid: input.actorUid,
+      phoneNumber: input.phoneNumber,
+      groupId,
+      items: carriedItems as PracticeItem[],
+    });
+    carried.push(groupId);
+  }
+
+  return { carried };
+}
+
+export async function getMyPracticeTodayCore(input: { uid: string; groupId: string }) {
+  const groupId = input.groupId.trim();
+  await assertMemberBelongsToGroup(input.uid, groupId);
+
   const dateKey = practiceDateKey();
   const aliases = await requireMemberAliases({ uid: input.uid });
-  const assignment = await loadAssignmentForAliases(aliases);
+  const assignment = await loadAssignmentForAliases(aliases, groupId);
   if (!assignment || assignment.items.length === 0) {
-    return { practiceDateKey: dateKey, assignment: null, items: [] as ReturnType<typeof enrichItems> };
+    return { practiceDateKey: dateKey, groupId, assignment: null, items: [] as ReturnType<typeof enrichItems> };
   }
 
   const items = assignment.items;
-  const groupId = String(assignment.data.groupId ?? '');
-  const completedKeys = await loadCompletedKeysForUids(aliases.uids, dateKey);
+  const completedKeys = await loadCompletedKeysForUids(aliases.uids, groupId, dateKey);
   const titles = await loadChapterTitles(
     items.filter((i) => i.type === 'adhyay').map((i) => Number(i.chapterNumber))
   );
 
   return {
     practiceDateKey: dateKey,
+    groupId,
     assignment: {
       uid: input.uid,
       memberKey: aliases.memberKey,
@@ -563,14 +786,20 @@ function buildCompletionLog(input: {
   };
 }
 
-export async function markPracticeItemCompleteCore(input: { uid: string; itemKey: string }) {
+export async function markPracticeItemCompleteCore(input: {
+  uid: string;
+  groupId: string;
+  itemKey: string;
+}) {
   const itemKey = input.itemKey.trim();
   if (!itemKey) {
     throw new HttpsError('invalid-argument', 'itemKey is required.');
   }
+  const groupId = input.groupId.trim();
+  await assertMemberBelongsToGroup(input.uid, groupId);
 
   const aliases = await requireMemberAliases({ uid: input.uid });
-  const assignment = await loadAssignmentForAliases(aliases);
+  const assignment = await loadAssignmentForAliases(aliases, groupId);
   if (!assignment || assignment.items.length === 0) {
     throw new HttpsError('failed-precondition', 'No Adhyays found for your practice today.');
   }
@@ -583,23 +812,25 @@ export async function markPracticeItemCompleteCore(input: { uid: string; itemKey
   }
 
   const dateKey = practiceDateKey();
-  const logId = practiceLogDocId(input.uid, dateKey, itemKey);
+  const logId = practiceLogDocId(input.uid, groupId, dateKey, itemKey);
   const logRef = db.collection(COLLECTION_LOGS).doc(logId);
   const existing = await logRef.get();
   if (existing.exists) {
-    return { logId, practiceDateKey: dateKey, alreadyComplete: true };
+    return { logId, groupId, practiceDateKey: dateKey, alreadyComplete: true };
   }
 
   // An earlier session may have logged this under a different alias id. Still record
   // it under the caller's own uid (keeping the original timestamp) so the member's
   // direct read and the admin's per-member reporting stay consistent.
-  const alreadyComplete = (await loadCompletedKeysForUids(aliases.uids, dateKey)).has(itemKey);
+  const alreadyComplete = (
+    await loadCompletedKeysForUids(aliases.uids, groupId, dateKey)
+  ).has(itemKey);
   let completedAt: unknown;
   if (alreadyComplete) {
     const aliasIds = aliases.uids.filter((uid) => uid !== input.uid);
     const aliasLogs = await db.getAll(
       ...aliasIds.map((uid) =>
-        db.collection(COLLECTION_LOGS).doc(practiceLogDocId(uid, dateKey, itemKey))
+        db.collection(COLLECTION_LOGS).doc(practiceLogDocId(uid, groupId, dateKey, itemKey))
       )
     );
     for (const snap of aliasLogs) {
@@ -614,32 +845,35 @@ export async function markPracticeItemCompleteCore(input: { uid: string; itemKey
     buildCompletionLog({
       uid: input.uid,
       aliases,
-      groupId: String(assignment.data.groupId ?? ''),
+      groupId,
       dateKey,
       item: matched,
       completedAt,
     })
   );
 
-  return { logId, practiceDateKey: dateKey, alreadyComplete };
+  return { logId, groupId, practiceDateKey: dateKey, alreadyComplete };
 }
 
 /** Mark every pending Adhyay/Aarti complete for the current practice day. */
-export async function markAllPracticeCompleteCore(input: { uid: string }) {
+export async function markAllPracticeCompleteCore(input: { uid: string; groupId: string }) {
+  const groupId = input.groupId.trim();
+  await assertMemberBelongsToGroup(input.uid, groupId);
+
   const aliases = await requireMemberAliases({ uid: input.uid });
-  const assignment = await loadAssignmentForAliases(aliases);
+  const assignment = await loadAssignmentForAliases(aliases, groupId);
   if (!assignment || assignment.items.length === 0) {
     throw new HttpsError('failed-precondition', 'No Adhyays found for your practice today.');
   }
 
   const dateKey = practiceDateKey();
-  const completedKeys = await loadCompletedKeysForUids(aliases.uids, dateKey);
+  const completedKeys = await loadCompletedKeysForUids(aliases.uids, groupId, dateKey);
   const pending = assignment.items.filter((item) => !completedKeys.has(item.itemKey));
   if (pending.length === 0) {
-    return { practiceDateKey: dateKey, completedCount: 0, alreadyComplete: true };
+    return { groupId, practiceDateKey: dateKey, completedCount: 0, alreadyComplete: true };
   }
 
-  // The member's home screen reads `practice_completion_logs/{uid}_{date}_{item}`,
+  // The member's home screen reads `practice_completion_logs/{uid}_{group}_{date}_{item}`,
   // so a completion logged under a different alias id has to be mirrored onto the
   // caller's own uid or it would show up as still pending in the app.
   const aliasIds = aliases.uids.filter((uid) => uid !== input.uid);
@@ -648,7 +882,9 @@ export async function markAllPracticeCompleteCore(input: { uid: string }) {
     const aliasLogs = await db.getAll(
       ...assignment.items.flatMap((item) =>
         aliasIds.map((uid) =>
-          db.collection(COLLECTION_LOGS).doc(practiceLogDocId(uid, dateKey, item.itemKey))
+          db.collection(COLLECTION_LOGS).doc(
+            practiceLogDocId(uid, groupId, dateKey, item.itemKey)
+          )
         )
       )
     );
@@ -661,11 +897,10 @@ export async function markAllPracticeCompleteCore(input: { uid: string }) {
     }
   }
 
-  const groupId = String(assignment.data.groupId ?? '');
   const batch = db.batch();
   for (const item of assignment.items) {
     batch.set(
-      db.collection(COLLECTION_LOGS).doc(practiceLogDocId(input.uid, dateKey, item.itemKey)),
+      db.collection(COLLECTION_LOGS).doc(practiceLogDocId(input.uid, groupId, dateKey, item.itemKey)),
       buildCompletionLog({
         uid: input.uid,
         aliases,
@@ -681,6 +916,7 @@ export async function markAllPracticeCompleteCore(input: { uid: string }) {
   await batch.commit();
 
   return {
+    groupId,
     practiceDateKey: dateKey,
     completedCount: pending.length,
     alreadyComplete: false,
@@ -723,9 +959,10 @@ export async function getPracticeAdminOverviewCore(input: {
   ]);
 
   // Batched point reads keyed by the phone — authoritative for "what does this
-  // member practise", independent of any groupId stamp on the doc.
+  // member practise in *this* group", independent of any other group they are in.
   const memberAssignments = await loadAssignmentsByMemberKey(
-    rosterMembers.map((member) => member.memberKey)
+    rosterMembers.map((member) => member.memberKey),
+    groupId
   );
 
   // Older completion rows only carry an account uid. Repair them once so their
@@ -1016,21 +1253,56 @@ async function loadGroupUserProfiles(groupId: string) {
  * doc still carries a previous `groupId`, is resolved here regardless of index
  * state or stamp drift, so "added on People" always means "listed on Practice".
  */
-export async function loadAssignmentsByMemberKey(memberKeys: string[]) {
+/**
+ * Per-group standing assignments for a set of members, keyed by memberKey.
+ *
+ * Reads the group-scoped doc id first, then falls back to the pre-multi-group doc
+ * when it is stamped with this group. Both are kept forever so a rollback stays
+ * survivable and history written before the change is never lost.
+ */
+export async function loadAssignmentsByMemberKey(memberKeys: string[], groupId: string) {
   const unique = [...new Set(memberKeys.filter(Boolean))];
   const byMemberKey = new Map<string, { data: Record<string, unknown>; items: PracticeItem[] }>();
-  if (unique.length === 0) return byMemberKey;
+  if (unique.length === 0 || !groupId) return byMemberKey;
+
+  const record = (snap: {
+    id: string;
+    exists: boolean;
+    data: () => DocumentData | undefined;
+  }): { key: string; data: Record<string, unknown>; items: PracticeItem[] } | null => {
+    if (!snap.exists) return null;
+    const data = (snap.data() ?? {}) as Record<string, unknown>;
+    const items = normalizePracticeItems(data.items);
+    if (items.length === 0) return null;
+    // Newer docs carry `memberKey`; legacy ones are addressed by their own id.
+    const key = typeof data.memberKey === 'string' && data.memberKey ? data.memberKey : snap.id;
+    return { key, data, items };
+  };
 
   try {
-    const snaps = await db.getAll(
-      ...unique.map((memberKey) => db.collection(COLLECTION_ASSIGNMENTS).doc(memberKey))
-    );
-    for (const snap of snaps) {
-      if (!snap.exists) continue;
-      const data = (snap.data() ?? {}) as Record<string, unknown>;
-      const items = normalizePracticeItems(data.items);
-      if (items.length === 0) continue;
-      byMemberKey.set(snap.id, { data, items });
+    const [scopedSnaps, legacySnaps] = await Promise.all([
+      db.getAll(
+        ...unique.map((memberKey) =>
+          db.collection(COLLECTION_ASSIGNMENTS).doc(assignmentDocId(memberKey, groupId))
+        )
+      ),
+      db.getAll(
+        ...unique.map((memberKey) =>
+          db.collection(COLLECTION_ASSIGNMENTS).doc(legacyAssignmentDocId(memberKey))
+        )
+      ),
+    ]);
+
+    // Group-scoped wins, so a member migrated to the new id is not overwritten by
+    // their leftover legacy doc.
+    for (const entry of legacySnaps.map(record)) {
+      if (!entry) continue;
+      if (String(entry.data.groupId ?? '') !== groupId) continue;
+      byMemberKey.set(entry.key, { data: entry.data, items: entry.items });
+    }
+    for (const entry of scopedSnaps.map(record)) {
+      if (!entry) continue;
+      byMemberKey.set(entry.key, { data: entry.data, items: entry.items });
     }
   } catch (error) {
     console.warn('practice_assignment_batch_read_failed', {

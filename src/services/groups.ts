@@ -87,16 +87,48 @@ export async function fetchGroups(): Promise<Group[]> {
   return groups.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 }
 
+/**
+ * Collect the groups that resolved, dropping the ones that did not.
+ *
+ * Split out from {@link fetchGroupsByIds} so the "one bad group must not blank the
+ * whole list" rule is directly testable — a member in several groups depends on
+ * it, because losing the list also loses the group switcher and leaves them on the
+ * "no group assigned" screen.
+ */
+export function collectReadableGroups<T>(
+  results: PromiseSettledResult<{ group: T | null }>[]
+): T[] {
+  return results
+    .filter(
+      (result): result is PromiseFulfilledResult<{ group: T | null }> =>
+        result.status === 'fulfilled'
+    )
+    .map((result) => result.value.group)
+    .filter((group): group is T => group !== null);
+}
+
 export async function fetchGroupsByIds(ids: string[]): Promise<Group[]> {
   if (ids.length === 0) return [];
 
   const uniqueIds = [...new Set(ids.filter(Boolean))];
-  const snapshots = await Promise.all(uniqueIds.map((id) => getDoc(doc(db, 'groups', id))));
+  // Resolved per group rather than with Promise.all: a single unreadable or deleted
+  // group must not blank the whole list. With one group a member never noticed,
+  // but a member in several groups lost the switcher — and their group list — the
+  // moment any one of those groups failed to read.
+  const settled = await Promise.allSettled(
+    uniqueIds.map(async (id) => {
+      const snapshot = await getDoc(doc(db, 'groups', id));
+      return {
+        group: snapshot.exists()
+          ? mapGroup(snapshot.id, snapshot.data() as Record<string, unknown>)
+          : null,
+      };
+    })
+  );
 
-  return snapshots
-    .filter((snapshot) => snapshot.exists())
-    .map((snapshot) => mapGroup(snapshot.id, snapshot.data() as Record<string, unknown>))
-    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  return collectReadableGroups<Group>(settled).sort(
+    (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+  );
 }
 
 export function subscribeGroups(onChange: (groups: Group[]) => void, onError?: (error: Error) => void): Unsubscribe {
@@ -277,15 +309,23 @@ export async function fetchGroupMembers(
   groupId: string
 ): Promise<Array<{ uid: string; name: string; phoneNumber: string }>> {
   try {
-    const snapshot = await getDocs(query(collection(db, 'users'), where('groupId', '==', groupId)));
-    return snapshot.docs.map((entry) => {
-      const data = entry.data() as Record<string, unknown>;
-      return {
-        uid: entry.id,
+    // Use groupIds array-contains UNION groupId == so members in multiple groups
+    // appear in every group they belong to, not just their primary one.
+    const [byArray, byScalar] = await Promise.all([
+      getDocs(query(collection(db, 'users'), where('groupIds', 'array-contains', groupId))),
+      getDocs(query(collection(db, 'users'), where('groupId', '==', groupId))),
+    ]);
+
+    const byId = new Map<string, { uid: string; name: string; phoneNumber: string }>();
+    for (const doc of [...byScalar.docs, ...byArray.docs]) {
+      const data = doc.data() as Record<string, unknown>;
+      byId.set(doc.id, {
+        uid: doc.id,
         name: String(data.name ?? ''),
         phoneNumber: String(data.phoneNumber ?? ''),
-      };
-    });
+      });
+    }
+    return [...byId.values()];
   } catch (error) {
     console.warn('[groups] fetchGroupMembers users query failed, using roster', error);
     const { fetchAccessRosterPage } = await import('@/services/roster');

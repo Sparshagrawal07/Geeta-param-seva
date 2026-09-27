@@ -28,6 +28,7 @@ import {
 } from './pin-auth';
 import { registerSoleSession } from './sessions';
 import {
+  backfillGroupIds,
   deactivateAccessRosterEntry,
   listAccessRosterCore,
   migrateWhitelistToRoster as runMigrateWhitelistToRoster,
@@ -62,6 +63,15 @@ const region = 'asia-south1';
  * a full deploy health-checks new revisions while old ones still run — that
  * doubles CPU and hits "Quota exceeded for total allowable CPU per project per region".
  * `gcf_gen1` keeps fractional CPU (1st-gen style) so batch deploys fit the quota.
+ *
+ * COST POLICY — every function scales to zero and nothing is pinned warm.
+ * `minInstances: 1` is a *permanent* Cloud Run instance charge per function:
+ * roughly $37/month across the hot callables, which dwarfs the entire
+ * invocation bill for a community app this size. Cold starts are the price paid
+ * instead, and the code compensates by keeping each invocation short (batched
+ * reads, fewer round trips) rather than by staying warm.
+ *
+ * Do not reintroduce `minInstances` here without a billing sign-off.
  */
 setGlobalOptions({
   region,
@@ -71,28 +81,6 @@ setGlobalOptions({
 const callableOptions = {
   region,
   enforceAppCheck: enforceAppCheck(),
-};
-
-/**
- * Warm instances for the handful of callables every screen hits.
- *
- * Without a minimum the instance scales to zero between openings, and the first
- * call after an idle period pays a full cold start — which is what made the app
- * feel "very very slow" even though the queries themselves are small. Only the
- * hot path is pinned; everything else still scales to zero.
- *
- * Set the `WARM_MIN_INSTANCES` env var to `0` to trade the latency back for a
- * smaller idle bill (the value is clamped, so a typo can never scale up).
- */
-const WARM_MIN_INSTANCES = Math.min(
-  Math.max(Number(process.env.WARM_MIN_INSTANCES ?? '1') || 0, 0),
-  5
-);
-
-/** Callable options for the latency-sensitive read/write path. */
-const warmCallableOptions = {
-  ...callableOptions,
-  minInstances: WARM_MIN_INSTANCES,
 };
 
 function toHttpsError(error: unknown) {
@@ -131,7 +119,7 @@ async function assertCanManageGroup(uid: string, groupId: string) {
 }
 
 /** Phone + PIN → Firebase custom token (no SMS / reCAPTCHA). */
-export const signInWithGroupPin = onCall(warmCallableOptions, async (request) => {
+export const signInWithGroupPin = onCall(callableOptions, async (request) => {
   try {
     const phoneNumber = normalizeE164Phone(request.data?.phoneNumber);
     const pin = normalizePin(request.data?.pin);
@@ -242,7 +230,7 @@ export const setGroupPin = onCall(callableOptions, async (request) => {
 });
 
 /** Add or update access_roster entry (CF-only writes). */
-export const upsertAccessRoster = onCall(warmCallableOptions, async (request) => {
+export const upsertAccessRoster = onCall(callableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -253,6 +241,7 @@ export const upsertAccessRoster = onCall(warmCallableOptions, async (request) =>
       name: request.data?.name,
       role: request.data?.role,
       groupId: request.data?.groupId,
+      groupIds: request.data?.groupIds,
       assignedGroupIds: request.data?.assignedGroupIds,
       status: request.data?.status,
     });
@@ -262,7 +251,7 @@ export const upsertAccessRoster = onCall(warmCallableOptions, async (request) =>
 });
 
 /** Soft-deactivate an access_roster entry. */
-export const deactivateAccessRoster = onCall(warmCallableOptions, async (request) => {
+export const deactivateAccessRoster = onCall(callableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -342,7 +331,7 @@ export const markJoinApplicationAdded = onCall(callableOptions, async (request) 
 });
 
 /** Admin list roster (Admin SDK — reliable vs client list rules). */
-export const listAccessRoster = onCall(warmCallableOptions, async (request) => {
+export const listAccessRoster = onCall(callableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -380,8 +369,23 @@ export const migrateWhitelistToRoster = onCall(callableOptions, async (request) 
   }
 });
 
+/**
+ * Senior admin: derive `groupIds` on every roster row and profile that only has the
+ * scalar `groupId`. Idempotent, so it is safe to re-run after adding more members.
+ */
+export const backfillMemberGroupIds = onCall(callableOptions, async (request) => {
+  try {
+    if (!request.auth?.uid) {
+      throw new HttpsError('unauthenticated', 'Sign in required.');
+    }
+    return await backfillGroupIds(request.auth.uid);
+  } catch (error) {
+    throw toHttpsError(error);
+  }
+});
+
 /** Admin sets standing Adhyay/Aarti practice for a member. */
-export const setMemberPracticeAssignment = onCall(warmCallableOptions, async (request) => {
+export const setMemberPracticeAssignment = onCall(callableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -403,20 +407,32 @@ export const setMemberPracticeAssignment = onCall(warmCallableOptions, async (re
   }
 });
 
-/** Member home: today's standing practice + completion flags. */
-export const getMyPracticeToday = onCall(warmCallableOptions, async (request) => {
+/** Read the group a member-facing call is scoped to. */
+function requireRequestGroupId(value: unknown): string {
+  const groupId = typeof value === 'string' ? value.trim() : '';
+  if (!groupId) {
+    throw new HttpsError('invalid-argument', 'Group is required.');
+  }
+  return groupId;
+}
+
+/** Member home: today's standing practice + completion flags for one group. */
+export const getMyPracticeToday = onCall(callableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
     }
-    return await getMyPracticeTodayCore({ uid: request.auth.uid });
+    return await getMyPracticeTodayCore({
+      uid: request.auth.uid,
+      groupId: requireRequestGroupId(request.data?.groupId),
+    });
   } catch (error) {
     throw toHttpsError(error);
   }
 });
 
 /** Member marks one Adhyay/Aarti complete for the current practice day. */
-export const markPracticeItemComplete = onCall(warmCallableOptions, async (request) => {
+export const markPracticeItemComplete = onCall(callableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -427,6 +443,7 @@ export const markPracticeItemComplete = onCall(warmCallableOptions, async (reque
     }
     return await markPracticeItemCompleteCore({
       uid: request.auth.uid,
+      groupId: requireRequestGroupId(request.data?.groupId),
       itemKey,
     });
   } catch (error) {
@@ -435,19 +452,22 @@ export const markPracticeItemComplete = onCall(warmCallableOptions, async (reque
 });
 
 /** Member marks all pending Adhyays/Aarti complete for the current practice day. */
-export const markAllPracticeComplete = onCall(warmCallableOptions, async (request) => {
+export const markAllPracticeComplete = onCall(callableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
     }
-    return await markAllPracticeCompleteCore({ uid: request.auth.uid });
+    return await markAllPracticeCompleteCore({
+      uid: request.auth.uid,
+      groupId: requireRequestGroupId(request.data?.groupId),
+    });
   } catch (error) {
     throw toHttpsError(error);
   }
 });
 
 /** Admin: per-member practice completion for current practice day. */
-export const getPracticeAdminOverview = onCall(warmCallableOptions, async (request) => {
+export const getPracticeAdminOverview = onCall(callableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -464,7 +484,7 @@ export const getPracticeAdminOverview = onCall(warmCallableOptions, async (reque
 });
 
 /** Admin: push reminder to one incomplete member or all incomplete. */
-export const sendPracticeReminder = onCall(warmCallableOptions, async (request) => {
+export const sendPracticeReminder = onCall(callableOptions, async (request) => {
   try {
     if (!request.auth?.uid) {
       throw new HttpsError('unauthenticated', 'Sign in required.');
@@ -610,10 +630,14 @@ export const wipeDailyFeed = onSchedule(
  * client creates posts/polls directly in Firestore, so those counters drift
  * permanently. This recomputes them from the source collections — idempotent
  * overwrites, so retries cannot inflate them.
+ *
+ * Hourly is deliberate: the roster write path already keeps `memberCount`
+ * correct in real time, so this is only a backstop and 24 invocations a day is
+ * far cheaper than the reads it saves nothing on.
  */
 export const syncGroupCounters = onSchedule(
   {
-    schedule: '*/30 * * * *',
+    schedule: '17 * * * *',
     region,
     timeZone: 'Asia/Kolkata',
     timeoutSeconds: 300,

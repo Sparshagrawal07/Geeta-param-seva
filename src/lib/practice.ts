@@ -27,6 +27,8 @@ export interface PracticeItemToday extends PracticeItem {
 
 export interface MyPracticeToday {
   practiceDateKey: string;
+  /** The group this view belongs to. Every item and completion is scoped to it. */
+  groupId: string;
   assignment: MemberPracticeAssignment | null;
   items: PracticeItemToday[];
 }
@@ -85,8 +87,29 @@ export function practiceDateKey(now: Date = new Date(), timeZone = PRACTICE_TIME
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
-export function practiceLogDocId(uid: string, dateKey: string, itemKey: string): string {
+/**
+ * Completion log id, per (member, group, day, item).
+ *
+ * The group is in the id because a member in two groups practises separately —
+ * without it, finishing Adhyay 1 in one group would tick it off in the other.
+ */
+export function practiceLogDocId(
+  uid: string,
+  groupId: string,
+  dateKey: string,
+  itemKey: string
+): string {
+  return `${uid}_${groupId}_${dateKey}_${itemKey}`;
+}
+
+/** Pre-multi-group log id. Read as a fallback so old history still shows. */
+export function legacyPracticeLogDocId(uid: string, dateKey: string, itemKey: string): string {
   return `${uid}_${dateKey}_${itemKey}`;
+}
+
+/** Standing assignment id, per (member alias, group). */
+export function assignmentDocId(aliasUid: string, groupId: string): string {
+  return `${aliasUid}_${groupId}`;
 }
 
 export type PracticeValidationError =

@@ -12,7 +12,7 @@ import { TranslatedAppText } from '@/components/ui/translated-app-text';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
 import { SectionHeader } from '@/components/ui/section-header';
-import { useAuth } from '@/hooks/use-auth';
+import { useMemberSelectedGroup } from '@/hooks/use-member-selected-group';
 import { useNotifications } from '@/hooks/use-notifications';
 import { formatFeedDateTime } from '@/lib/format';
 import type { Locale } from '@/lib/i18n/messages';
@@ -69,9 +69,8 @@ const notificationKeyExtractor = (item: AppNotification) => item.id;
 
 export default function UserNotificationsScreen() {
   const { locale, t } = useLocale();
-  const { profile } = useAuth();
 
-  const groupId = profile?.groupId ?? null;
+  const { groupId } = useMemberSelectedGroup();
   const { items, loading, error, refresh } = useNotifications(groupId);
   const [refreshing, setRefreshing] = useState(false);
   const [lastSeenAt, setLastSeenAt] = useState<number | null>(null);

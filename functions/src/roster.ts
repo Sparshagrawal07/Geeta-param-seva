@@ -1,9 +1,18 @@
-import { FieldValue, type DocumentData } from 'firebase-admin/firestore';
+import { FieldPath, FieldValue, type DocumentData, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 
 import { adminAuth, db } from './firebase-admin';
-import { findUserDocIdsByPhone, phoneToRosterId } from './member-identity';
-import { reassignMemberPracticeGroup } from './practice';
+import {
+  addedGroupIds,
+  groupFieldsFor,
+  normalizeGroupIds,
+  readGroupIds,
+  readPrimaryGroupId,
+  removedGroupIds,
+  resolveMemberships,
+} from './group-membership';
+import { findUserDocIdsByPhone, phoneToRosterId, phoneToUid } from './member-identity';
+import { carryMemberPracticeGroups, pruneMemberPracticeGroups } from './practice';
 import { reindexUserPushTokens } from './push';
 import {
   loadGroupAdmins,
@@ -23,12 +32,28 @@ export interface AccessRosterEntry {
   name: string;
   phoneNumber: string;
   role: RosterRole;
+  /** Primary group, kept in sync with `groupIds[0]` for legacy readers. */
   groupId?: string | null;
+  /** Every group this member belongs to. Empty for admins (see `assignedGroupIds`). */
+  groupIds?: string[];
   assignedGroupIds?: string[];
   status: RosterStatus;
   createdBy: string;
 }
 
+/** Indian mobile numbers, which is every number this app accepts. */
+const DEFAULT_COUNTRY_CODE = '91';
+const INDIA_MOBILE_LENGTH = 10;
+
+/**
+ * Collapse the many ways a human types the same number onto one stored value.
+ *
+ * `+9876543210` and `+919876543210` are the same person, but they produced two
+ * different `access_roster` doc ids (`phoneToRosterId` strips the `+` and keeps
+ * every digit), so the same human could exist twice in one group with two rosters,
+ * two assignments and two completion histories. Normalising to `+91` on the way in
+ * means the duplicate can no longer be created.
+ */
 function normalizeRosterPhone(input: unknown): string {
   if (typeof input !== 'string') {
     throw new HttpsError('invalid-argument', 'Phone number is required.');
@@ -38,6 +63,13 @@ function normalizeRosterPhone(input: unknown): string {
   if (!/^\+[1-9]\d{7,14}$/.test(withPlus)) {
     throw new HttpsError('invalid-argument', 'Enter a valid mobile number.');
   }
+
+  const digits = withPlus.slice(1);
+  if (digits.length === INDIA_MOBILE_LENGTH) {
+    return `+${DEFAULT_COUNTRY_CODE}${digits}`;
+  }
+  // A number that already carries a country code is left alone: guessing would be
+  // worse than storing what the admin typed.
   return withPlus;
 }
 
@@ -64,7 +96,8 @@ function serializeRosterDoc(id: string, data: DocumentData) {
     name: String(data.name ?? ''),
     phoneNumber: String(data.phoneNumber ?? ''),
     role: data.role === 'admin' ? 'admin' : 'user',
-    groupId: typeof data.groupId === 'string' ? data.groupId : null,
+    groupId: readPrimaryGroupId(data),
+    groupIds: readGroupIds(data),
     assignedGroupIds: Array.isArray(data.assignedGroupIds) ? data.assignedGroupIds.map(String) : [],
     status: data.status === 'inactive' ? 'inactive' : 'active',
     createdBy: typeof data.createdBy === 'string' ? data.createdBy : undefined,
@@ -80,6 +113,7 @@ function serializeRosterEntry(member: GroupRosterMember) {
     phoneNumber: member.phoneNumber,
     role: member.role,
     groupId: member.groupId,
+    groupIds: member.groupIds,
     assignedGroupIds: member.assignedGroupIds,
     status: member.status,
   };
@@ -211,6 +245,19 @@ async function listAuthUidsForPhone(phoneNumber: string): Promise<string[]> {
 }
 
 /**
+ * Group names for a set of groups, for stamping onto a member's profile.
+ *
+ * The member's switcher needs a label for every group they belong to. Reading the
+ * group documents again from the client is not dependable — a single denied or
+ * missing document would leave that group unlabelled — so the names are resolved
+ * here, where the Admin SDK is already reading the groups for validation.
+ */
+async function resolveGroupNames(groupIds: string[]): Promise<Record<string, string>> {
+  const { groupNames } = await resolveMemberships(groupIds);
+  return groupNames;
+}
+
+/**
  * Push a roster decision straight onto the member's `users` profile.
  *
  * Firestore rules (and the client's group scoping) read role / groupId /
@@ -223,6 +270,7 @@ async function syncAuthProfilesForPhone(input: {
   name: string;
   role: RosterRole;
   groupId: string | null;
+  groupIds: string[];
   assignedGroupIds: string[];
   status: RosterStatus;
   hasPersonalPin: boolean;
@@ -243,6 +291,15 @@ async function syncAuthProfilesForPhone(input: {
     phoneNumber: input.phoneNumber,
     role: input.role,
     groupId: input.role === 'user' ? input.groupId : null,
+  // `groupIds` drives multi-group access; `groupId` stays the primary so the
+  // client's single selected group and every legacy reader keep working.
+  groupIds: input.role === 'user' ? input.groupIds : [],
+  // Names travel with the membership, so the member's group switcher can label every
+  // group without a separate read of each group document.
+  groupNames: input.role === 'user' ? await resolveGroupNames(input.groupIds) : {},
+    // Mirrored so Firestore rules can recognise a member's own practice
+    // assignment doc by memberKey now that the doc id carries the group too.
+    memberKey: phoneToUid(input.phoneNumber),
     assignedGroupIds: input.role === 'admin' ? input.assignedGroupIds : [],
     hasPersonalPin: input.hasPersonalPin,
     // Mirrors upsertProfileFromLogin so the profile stays identical whichever
@@ -254,8 +311,9 @@ async function syncAuthProfilesForPhone(input: {
   if (input.name) profilePatch.name = input.name;
   if (input.status === 'inactive') {
     // Deactivated members lose group read access immediately (rules check
-    // `groupId`), and the restored value is written again on reactivation.
+    // `groupIds`), and the restored value is written again on reactivation.
     profilePatch.groupId = null;
+    profilePatch.groupIds = [];
     profilePatch.assignedGroupIds = [];
   }
 
@@ -286,6 +344,7 @@ export async function upsertAccessRosterEntry(input: {
   name: unknown;
   role: unknown;
   groupId?: unknown;
+  groupIds?: unknown;
   assignedGroupIds?: unknown;
   status?: unknown;
 }) {
@@ -317,16 +376,25 @@ export async function upsertAccessRosterEntry(input: {
   const status = statusRaw as RosterStatus;
 
   let groupId: string | null = null;
+  let groupIds: string[] = [];
   let assignedGroupIds: string[] = [];
 
   if (role === 'user') {
-    const gid = typeof input.groupId === 'string' ? input.groupId.trim() : '';
-    if (!gid) {
-      throw new HttpsError('invalid-argument', 'groupId is required for members.');
+    // `groupIds` is the input; `groupId` is still accepted so an older client build
+    // (which can only send one group) keeps working.
+    const requested = normalizeGroupIds(input.groupIds);
+    const single = typeof input.groupId === 'string' ? input.groupId.trim() : '';
+    const resolved = requested.length > 0 ? requested : single ? [single] : [];
+
+    if (resolved.length === 0) {
+      throw new HttpsError('invalid-argument', 'Select at least one group for the member.');
     }
-    assertCallerCanTouchGroups(caller, [gid]);
-    await assertGroupsExist([gid]);
-    groupId = gid;
+    assertCallerCanTouchGroups(caller, resolved);
+    await assertGroupsExist(resolved);
+    // Order is the admin's, and `groupId` mirrors the first entry, so the member
+    // lands on the group the admin listed first.
+    groupIds = resolved;
+    groupId = resolved[0]!;
     assignedGroupIds = [];
   } else {
     const rawIds = Array.isArray(input.assignedGroupIds)
@@ -345,9 +413,8 @@ export async function upsertAccessRosterEntry(input: {
   const ref = db.collection('access_roster').doc(phoneId);
   const existing = await ref.get();
   const previous = existing.data() ?? {};
-  const previousRole = previous.role === 'admin' ? 'admin' : previous.role === 'user' ? 'user' : null;
   const previousStatus = previous.status === 'inactive' ? 'inactive' : existing.exists ? 'active' : null;
-  const previousGroupId = typeof previous.groupId === 'string' ? previous.groupId : null;
+  const previousGroupIds = readGroupIds(previous);
   const hasPersonalPin = typeof previous.pinHash === 'string' && previous.pinHash.length > 0;
 
   const payload: Record<string, unknown> = {
@@ -356,6 +423,7 @@ export async function upsertAccessRosterEntry(input: {
     phoneNumber,
     role,
     groupId,
+    groupIds,
     assignedGroupIds,
     status,
     hasPersonalPin,
@@ -370,29 +438,34 @@ export async function upsertAccessRosterEntry(input: {
   await ref.set(payload, { merge: true });
 
   // Maintain cheap memberCount counters on groups (active members only).
-  const wasActiveMember = previousRole === 'user' && previousStatus === 'active' && previousGroupId;
-  const isActiveMember = role === 'user' && status === 'active' && groupId;
+  // Compared as sets because a member can now join or leave several groups in one
+  // edit, and only the groups they actually joined or left may move a counter.
+  const countedGroups = status === 'active' ? groupIds : [];
+  const countedGroupsBefore = previousStatus === 'active' ? previousGroupIds : [];
+  const joined = addedGroupIds(countedGroupsBefore, countedGroups);
+  const left = removedGroupIds(countedGroupsBefore, countedGroups);
 
-  if (wasActiveMember && previousGroupId && (!isActiveMember || previousGroupId !== groupId)) {
+  for (const groupIdLeft of left) {
     await db
       .collection('groups')
-      .doc(previousGroupId)
+      .doc(groupIdLeft)
       .set({ memberCount: FieldValue.increment(-1), statsUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
-  if (isActiveMember && groupId && (!wasActiveMember || previousGroupId !== groupId)) {
+  for (const groupIdJoined of joined) {
     await db
       .collection('groups')
-      .doc(groupId)
+      .doc(groupIdJoined)
       .set({ memberCount: FieldValue.increment(1), statsUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
 
   // Keep already-signed-in profiles in step with the roster so the member sees
-  // the new name / group on their next read instead of after a fresh sign-in.
+  // the new name / groups on their next read instead of after a fresh sign-in.
   const syncedUids = await syncAuthProfilesForPhone({
     phoneNumber,
     name,
     role,
     groupId,
+    groupIds,
     assignedGroupIds,
     status,
     hasPersonalPin,
@@ -400,7 +473,9 @@ export async function upsertAccessRosterEntry(input: {
 
   // A group move leaves the old group's push-token index behind. Re-index every
   // known device so reminders reach the member under their new group.
-  if (previousGroupId && previousGroupId !== groupId) {
+  const groupSetChanged =
+    previousGroupIds.length > 0 && previousGroupIds.join('|') !== groupIds.join('|');
+  if (groupSetChanged) {
     await Promise.all(
       syncedUids.map((uid) =>
         reindexUserPushTokens(uid).catch((error) => {
@@ -408,15 +483,28 @@ export async function upsertAccessRosterEntry(input: {
         })
       )
     );
+  }
 
-    // Carry the standing practice across so the new group's practice screen is
-    // not left claiming the member has no assignment.
-    await reassignMemberPracticeGroup({
+  // A move must not cost the member the plan they were already given, so carry it
+  // across first, then drop it from the groups they left. Their *completion
+  // history* is never touched, so the leaving groups' reports keep their rows.
+  if (left.length > 0 && joined.length > 0) {
+    await carryMemberPracticeGroups({
       phoneNumber,
-      groupId,
+      fromGroupIds: left,
+      toGroupIds: joined,
       actorUid: input.actorUid,
     }).catch((error) => {
-      console.warn('roster_practice_reassign_failed', { phoneNumber, error });
+      console.warn('roster_practice_carry_failed', { phoneNumber, left, joined, error });
+    });
+  }
+  if (left.length > 0) {
+    await pruneMemberPracticeGroups({
+      phoneNumber,
+      groupIds: left,
+      actorUid: input.actorUid,
+    }).catch((error) => {
+      console.warn('roster_practice_prune_failed', { phoneNumber, groupIds: left, error });
     });
   }
 
@@ -443,9 +531,9 @@ export async function deactivateAccessRosterEntry(input: {
   const data = snap.data() ?? {};
   const role = data.role === 'admin' ? 'admin' : 'user';
   if (role === 'user') {
-    const gid = typeof data.groupId === 'string' ? data.groupId : '';
-    if (gid) {
-      assertCallerCanTouchGroups(caller, [gid]);
+    const groupIds = readGroupIds(data);
+    if (groupIds.length > 0) {
+      assertCallerCanTouchGroups(caller, groupIds);
     } else if (caller.role !== 'senior_admin') {
       throw new HttpsError('permission-denied', 'Not allowed.');
     }
@@ -460,7 +548,8 @@ export async function deactivateAccessRosterEntry(input: {
     }
   }
 
-  const wasActiveMember = role === 'user' && data.status !== 'inactive' && typeof data.groupId === 'string';
+  const wasActiveMember = role === 'user' && data.status !== 'inactive';
+  const groupIdsAtDeactivation = readGroupIds(data);
 
   await ref.set(
     {
@@ -470,11 +559,15 @@ export async function deactivateAccessRosterEntry(input: {
     { merge: true }
   );
 
+  // A deactivated member leaves *every* group they were counted in, not just the
+  // primary one, or the per-group counters drift apart from the roster.
   if (wasActiveMember) {
-    await db
-      .collection('groups')
-      .doc(String(data.groupId))
-      .set({ memberCount: FieldValue.increment(-1), statsUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    for (const groupId of groupIdsAtDeactivation) {
+      await db
+        .collection('groups')
+        .doc(groupId)
+        .set({ memberCount: FieldValue.increment(-1), statsUpdatedAt: FieldValue.serverTimestamp() }, { merge: true });
+    }
   }
 
   // End any live sessions immediately so deactivated accounts lose access now,
@@ -502,6 +595,7 @@ export async function deactivateAccessRosterEntry(input: {
     name: typeof data.name === 'string' ? data.name : '',
     role,
     groupId: null,
+    groupIds: [],
     assignedGroupIds: [],
     status: 'inactive',
     hasPersonalPin: typeof data.pinHash === 'string' && data.pinHash.length > 0,
@@ -552,6 +646,7 @@ export async function migrateWhitelistToRoster(actorUid: string) {
         phoneNumber,
         role: 'admin',
         groupId: null,
+        groupIds: [],
         assignedGroupIds,
         status: 'active',
         createdBy: actorUid,
@@ -576,8 +671,8 @@ export async function migrateWhitelistToRoster(actorUid: string) {
       skipped += 1;
       continue;
     }
-    const groupId = typeof data.groupId === 'string' ? data.groupId : null;
-    if (!groupId) {
+    const groupIds = readGroupIds(data);
+    if (groupIds.length === 0) {
       continue;
     }
     await db
@@ -587,7 +682,8 @@ export async function migrateWhitelistToRoster(actorUid: string) {
         name: typeof data.name === 'string' ? data.name : '',
         phoneNumber,
         role: 'user',
-        groupId,
+        groupId: groupIds[0]!,
+        groupIds,
         assignedGroupIds: [],
         status: 'active',
         createdBy: actorUid,
@@ -599,6 +695,103 @@ export async function migrateWhitelistToRoster(actorUid: string) {
   }
 
   return { created, skipped };
+}
+
+/**
+ * The `memberKey` a profile is missing, or null when it already matches.
+ *
+ * Only real members get one — an admin or senior admin has no member alias, and
+ * stamping one on them would let a member-key rule match an admin's assignments.
+ */
+function memberKeyPatchFor(data: Record<string, unknown>): { memberKey: string } | null {
+  const phoneNumber = typeof data.phoneNumber === 'string' ? data.phoneNumber.trim() : '';
+  if (!phoneNumber) return null;
+  const role = typeof data.role === 'string' ? data.role : 'user';
+  if (role === 'admin' || role === 'senior_admin') return null;
+  if (readGroupIds(data).length === 0) return null;
+
+  const memberKey = phoneToUid(phoneNumber);
+  return data.memberKey === memberKey ? null : { memberKey };
+}
+
+/**
+ * Backfill `groupIds` on every roster row and profile that only has the scalar
+ * `groupId`, so `groupIds array-contains` queries and the new rules can rely on it.
+ *
+ * Idempotent and safe to re-run: a doc is only touched when the two disagree, and
+ * `groupId` is written as `groupIds[0]` so the legacy field keeps its meaning.
+ * Senior admin only — it rewrites access for every member in the app.
+ */
+export async function backfillGroupIds(actorUid: string) {
+  const caller = await assertCallerCanManageRoster(actorUid);
+  if (caller.role !== 'senior_admin') {
+    throw new HttpsError('permission-denied', 'Senior admin only.');
+  }
+
+  let scanned = 0;
+  let updated = 0;
+
+  const syncCollection = async (collectionName: string) => {
+    let lastDoc: QueryDocumentSnapshot | null = null;
+    for (;;) {
+      let query = db.collection(collectionName).orderBy(FieldPath.documentId()).limit(200);
+      if (lastDoc) {
+        query = query.startAfter(lastDoc);
+      }
+      const snap = await query.get();
+      if (snap.empty) return;
+
+      const batch = db.batch();
+      let batchCount = 0;
+      for (const doc of snap.docs) {
+        lastDoc = doc;
+        scanned += 1;
+        const data = doc.data() ?? {};
+        const stored = Array.isArray(data.groupIds)
+          ? data.groupIds.filter((id): id is string => typeof id === 'string')
+          : null;
+        const scalar = typeof data.groupId === 'string' ? data.groupId.trim() : '';
+        // Profiles also need the memberKey, because the transitional rules identify
+        // an assignment owner by it before the client has ever re-signed-in.
+        const memberKeyPatch =
+          collectionName === 'users' ? memberKeyPatchFor(data) : null;
+
+        if (stored !== null) {
+          // Already has the array — only fix a drifted primary.
+          const primary = stored[0] ?? scalar ?? null;
+          if (stored.length > 0 && primary === data.groupId && !memberKeyPatch) continue;
+          if (stored.length === 0 && !scalar && !memberKeyPatch) continue;
+          batch.set(
+            doc.ref,
+            {
+              ...groupFieldsFor(stored.length > 0 ? stored : scalar ? [scalar] : []),
+              ...memberKeyPatch,
+            },
+            { merge: true }
+          );
+        } else {
+          // Legacy row: derive the array from the scalar.
+          if (!scalar && !memberKeyPatch) continue;
+          batch.set(
+            doc.ref,
+            { ...groupFieldsFor(scalar ? [scalar] : []), ...memberKeyPatch },
+            { merge: true }
+          );
+        }
+        batchCount += 1;
+        updated += 1;
+      }
+
+      if (batchCount > 0) {
+        await batch.commit();
+      }
+    }
+  };
+
+  await syncCollection('access_roster');
+  await syncCollection('users');
+
+  return { scanned, updated };
 }
 
 /** Upsert roster from a successful legacy login resolution (auto-migration). */
@@ -616,11 +809,14 @@ export async function upsertRosterFromLegacyLogin(input: {
     return;
   }
 
+  const memberGroups = input.role === 'user' && input.groupId ? [input.groupId] : [];
+
   await ref.set({
     name: input.name,
     phoneNumber: input.phoneNumber,
     role: input.role,
     groupId: input.role === 'user' ? input.groupId : null,
+    groupIds: memberGroups,
     assignedGroupIds: input.role === 'admin' ? input.assignedGroupIds : [],
     status: 'active',
     createdBy: 'legacy-login-migration',

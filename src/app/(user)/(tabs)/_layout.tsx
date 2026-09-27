@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 
 import { DevotionalTabIcon } from '@/components/navigation/devotional-tab-icon';
 import { useSpiritualTabBarScreenOptions } from '@/components/navigation/spiritual-tab-bar';
+import { useMemberSelectedGroup } from '@/hooks/use-member-selected-group';
 import { useSevaTabBadge } from '@/hooks/use-seva-tab-badge';
 import { getTabLifecycleOptions } from '@/lib/platform-performance-policy';
 import { useLocale } from '@/providers/locale-provider';
@@ -10,7 +11,8 @@ import { useLocale } from '@/providers/locale-provider';
 /** Android / default: keep the existing solid spiritual tab bar. */
 export default function UserTabsLayout() {
   const { t } = useLocale();
-  const { hasUnread, clearBadge } = useSevaTabBadge();
+  const { groupId } = useMemberSelectedGroup();
+  const { hasUnread, clearBadge } = useSevaTabBadge(groupId);
   const tabBarOptions = useSpiritualTabBarScreenOptions();
 
   return (

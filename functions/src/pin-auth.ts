@@ -4,6 +4,7 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { HttpsError } from 'firebase-functions/v2/https';
 
 import { adminAuth, db } from './firebase-admin';
+import { readGroupIds, resolveMemberships } from './group-membership';
 import { phoneToUid } from './member-identity';
 import { claimPinHash, isPinHashTaken, releasePinHash } from './pin-hashes';
 import { getAccessRoster } from './roster';
@@ -123,7 +124,10 @@ export type ResolvedLogin =
       role: 'user';
       name: string;
       phoneNumber: string;
+      /** Primary group; the member lands here and `groupIds[0]` mirrors it. */
       groupId: string;
+      /** Every group this member belongs to. */
+      groupIds: string[];
       assignedGroupIds: string[];
       needsPersonalPin: false;
     };
@@ -259,8 +263,8 @@ export async function resolveLogin(phoneNumber: string, pin: string): Promise<Re
 
   // 4) Member with personal PIN (seeded / App Review demos) — join PIN never accepted.
   if (rosterRole === 'user' && personalHash) {
-    const groupId = typeof roster.groupId === 'string' ? roster.groupId : '';
-    if (!groupId) {
+    const groupIds = readGroupIds(roster);
+    if (groupIds.length === 0) {
       throw new HttpsError('permission-denied', 'No group assigned. Contact an admin.');
     }
     if (pinsMatch(pin, personalHash)) {
@@ -268,7 +272,8 @@ export async function resolveLogin(phoneNumber: string, pin: string): Promise<Re
         role: 'user',
         name,
         phoneNumber,
-        groupId,
+        groupId: groupIds[0]!,
+        groupIds,
         assignedGroupIds: [],
         needsPersonalPin: false,
       };
@@ -277,11 +282,14 @@ export async function resolveLogin(phoneNumber: string, pin: string): Promise<Re
   }
 
   // 5) Member — join PIN only; never elevates to admin.
-  const groupId = typeof roster.groupId === 'string' ? roster.groupId : '';
-  if (!groupId) {
+  // A member in several groups may join with the PIN of *any* one of them: they are
+  // already a member of all of them, and asking for one specific group's PIN would
+  // lock them out of the others.
+  const memberGroupIds = readGroupIds(roster);
+  if (memberGroupIds.length === 0) {
     throw new HttpsError('permission-denied', 'No group assigned. Contact an admin.');
   }
-  const matched = await findMatchingJoinPin(pin, [groupId]);
+  const matched = await findMatchingJoinPin(pin, memberGroupIds);
   if (!matched) {
     throw new HttpsError('permission-denied', 'Incorrect phone number or PIN.');
   }
@@ -289,7 +297,8 @@ export async function resolveLogin(phoneNumber: string, pin: string): Promise<Re
     role: 'user',
     name,
     phoneNumber,
-    groupId,
+    groupId: memberGroupIds[0]!,
+    groupIds: memberGroupIds,
     assignedGroupIds: [],
     needsPersonalPin: false,
   };
@@ -313,15 +322,31 @@ export async function upsertProfileFromLogin(uid: string, login: ResolvedLogin) 
   if (login.role === 'senior_admin') {
     payload.seniorAdminKey = login.phoneNumber.replace(/^\+/, '');
     payload.groupId = null;
+    payload.groupIds = [];
     payload.assignedGroupIds = [];
   } else if (login.role === 'admin') {
     payload.whitelistKey = login.phoneNumber.replace(/^\+/, '');
     payload.groupId = null;
+    // Admins are not members: their authority is `assignedGroupIds`, so a stale
+    // `groupIds` from a demotion must not survive.
+    payload.groupIds = [];
     payload.assignedGroupIds = login.assignedGroupIds;
   } else {
     payload.groupId = login.groupId;
+    // Multi-group membership. The client reads this to build the group switcher;
+    // Firestore rules read it to decide which groups this member may read.
+    payload.groupIds = login.groupIds.length > 0 ? login.groupIds : [login.groupId];
+    // Names travel with the membership so the switcher can label every group even
+    // when reading that group's document separately fails or is denied.
+    payload.groupNames = await resolveMemberships(
+      login.groupIds.length > 0 ? login.groupIds : [login.groupId]
+    ).then((resolved) => resolved.groupNames);
     payload.assignedGroupIds = [];
   }
+
+  // Mirrored from the login so Firestore rules can recognise the member's own
+  // practice assignment doc by memberKey now that the doc id carries the group.
+  payload.memberKey = phoneToUid(login.phoneNumber);
 
   await ref.set(payload, { merge: true });
 }

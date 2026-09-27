@@ -37,7 +37,7 @@ import {
   ANDROID_REMINDER_CHANNEL_NAME,
   REMINDER_SOUND_FILENAME,
 } from '@/lib/push-constants';
-import { SELECTED_GROUP_STORAGE_KEY, getStableDeviceId } from '@/lib/session';
+import { getStableDeviceId, selectedGroupStorageKey } from '@/lib/session';
 import { isAdminRole } from '@/lib/users';
 import { setDeviceEnabled, upsertDeviceToken } from '@/services/devices';
 
@@ -168,11 +168,12 @@ function readDataString(data: Record<string, unknown> | undefined, key: string):
 
 async function navigateFromNotificationData(
   data: Record<string, unknown> | undefined,
-  isAdmin: boolean
+  isAdmin: boolean,
+  uid: string | null
 ) {
   const groupId = readDataString(data, 'groupId');
-  if (groupId) {
-    await AsyncStorage.setItem(SELECTED_GROUP_STORAGE_KEY, groupId);
+  if (groupId && uid) {
+    await AsyncStorage.setItem(selectedGroupStorageKey(uid), groupId);
   }
 
   const screen = readDataString(data, 'screen')?.toLowerCase();
@@ -469,14 +470,14 @@ export function NotificationProvider({ children }: PropsWithChildren) {
         const data = response.notification.request.content.data as
           | Record<string, unknown>
           | undefined;
-        void navigateFromNotificationData(data, isAdminRole(profile?.role));
+        void navigateFromNotificationData(data, isAdminRole(profile?.role), profile?.uid ?? null);
       }
     );
 
     void Notifications.getLastNotificationResponseAsync().then((response) => {
       if (!response || !profile) return;
       const data = response.notification.request.content.data as Record<string, unknown> | undefined;
-      void navigateFromNotificationData(data, isAdminRole(profile.role));
+      void navigateFromNotificationData(data, isAdminRole(profile.role), profile.uid);
     });
 
     return () => {

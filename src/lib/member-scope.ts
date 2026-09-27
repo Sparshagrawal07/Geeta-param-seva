@@ -1,6 +1,9 @@
+import { profileGroupIds } from '@/lib/users';
+
 interface ScopedMember {
   role: 'senior_admin' | 'admin' | 'user';
   groupId?: string | null;
+  groupIds?: string[];
   assignedGroupIds?: string[];
 }
 
@@ -19,7 +22,8 @@ export function filterMembersByScope<T extends ScopedMember>(
 
   return members.filter(
     (member) =>
-      (member.role === 'user' && member.groupId != null && scopeGroupIds.includes(member.groupId)) ||
+      (member.role === 'user' &&
+        profileGroupIds(member).some((groupId) => scopeGroupIds.includes(groupId))) ||
       (member.role === 'admin' &&
         member.assignedGroupIds?.some((groupId) => scopeGroupIds.includes(groupId))) ||
       member.role === 'senior_admin'

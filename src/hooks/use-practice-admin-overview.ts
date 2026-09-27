@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 
 import { useAuth } from '@/hooks/use-auth';
 import { LOCAL_CACHE_POLICY, shouldRefreshCache } from '@/lib/cache/keys';
@@ -81,6 +82,16 @@ export function usePracticeAdminOverview(groupId?: string | null) {
       { cooldownMs: LOCAL_CACHE_POLICY.refreshCooldownMs }
     );
   }, [groupId, refresh, taskId, uid]);
+
+  // The roster can change on another tab (a member added, moved or deactivated
+  // on People) while this screen stays mounted, and the tab navigator keeps it
+  // mounted. Without a focus refresh the list is frozen at whatever it was when
+  // the screen first opened, so refresh whenever it comes back into view.
+  useFocusEffect(
+    useCallback(() => {
+      void refresh({ silent: true });
+    }, [refresh])
+  );
 
   return { overview, loading, error, refresh };
 }

@@ -64,6 +64,7 @@ export const messages = {
   groupPinRegenHint: 'Regenerating immediately invalidates the previous join PIN.',
   groupPinSet: 'Join PIN is set',
   groupPinMissing: 'Join PIN not set yet',
+  groupNameUnavailable: 'Group (details unavailable)',
   groupPinExpired: 'Join PIN expired — generate a new one',
   groupPinActiveUntil: 'Join PIN active until',
   groupPinUpdated: 'Join PIN updated.',
@@ -294,6 +295,9 @@ export const messages = {
   editMemberTitle: 'Edit member',
   editAdminTitle: 'Edit admin',
   rosterMemberGroupHint: 'Member will join this group.',
+  rosterMemberGroupsHint:
+    'Select every group this member belongs to. The first one is their primary group.',
+  rosterPrimaryGroupBadge: 'Primary',
   rosterAdminGroupsHint: 'Admin can manage these groups.',
   rosterSaved: 'Person saved to access roster.',
   rosterUpdated: 'Person updated.',

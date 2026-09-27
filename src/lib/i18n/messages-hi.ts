@@ -64,6 +64,7 @@ export const hiMessages: Record<MessageKey, string> = {
   groupPinRegenHint: 'फिर बनाने पर पिछला जॉइन पिन तुरंत अमान्य हो जाता है।',
   groupPinSet: 'जॉइन पिन सेट है',
   groupPinMissing: 'जॉइन पिन अभी सेट नहीं है',
+  groupNameUnavailable: 'समूह (विवरण उपलब्ध नहीं)',
   groupPinExpired: 'जॉइन पिन समाप्त — नया बनाएं',
   groupPinActiveUntil: 'जॉइन पिन सक्रिय तक',
   groupPinUpdated: 'जॉइन पिन अपडेट हो गया।',
@@ -294,6 +295,9 @@ export const hiMessages: Record<MessageKey, string> = {
   editMemberTitle: 'सदस्य संपादित करें',
   editAdminTitle: 'एडमिन संपादित करें',
   rosterMemberGroupHint: 'सदस्य इस समूह से जुड़ेगा।',
+  rosterMemberGroupsHint:
+    'चुनें कि यह सदस्य किन-किन समूहों से जुड़ा है। पहला समूह उनका मुख्य समूह होगा।',
+  rosterPrimaryGroupBadge: 'मुख्य',
   rosterAdminGroupsHint: 'एडमिन इन समूहों का प्रबंधन कर सकता है।',
   rosterSaved: 'व्यक्ति एक्सेस रोस्टर में सहेजा गया।',
   rosterUpdated: 'व्यक्ति अपडेट हुआ।',

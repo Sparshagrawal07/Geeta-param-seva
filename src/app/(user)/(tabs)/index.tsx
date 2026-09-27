@@ -4,12 +4,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GitaExploreEntry } from '@/components/gita/gita-explore-entry';
 import { SafeBannerAd } from '@/components/ads/safe-banner-ad';
+import { GroupScopeSelector } from '@/components/admin/group-scope-selector';
 import { TodaysPracticeList } from '@/components/practice/todays-practice-list';
 import { HomeHeroSection } from '@/components/verse/home-hero-section';
 import { EmptyState } from '@/components/ui/empty-state';
 import { ErrorState } from '@/components/ui/error-state';
 import { useAuth } from '@/hooks/use-auth';
 import { useLocalPerformanceSpan } from '@/hooks/use-local-performance-span';
+import { useMemberSelectedGroup } from '@/hooks/use-member-selected-group';
 import { useTodaysPractice } from '@/hooks/use-todays-practice';
 import { requestCoordinatedRefresh } from '@/lib/cache/refresh-coordinator';
 import { LOCAL_PERFORMANCE_BUDGETS } from '@/lib/local-performance';
@@ -19,8 +21,9 @@ export default function UserHomeScreen() {
   const { profile, loading: authLoading } = useAuth();
   const { t } = useLocale();
 
-  const groupId = profile?.groupId ?? null;
-  const practice = useTodaysPractice(Boolean(groupId));
+  const { groups, groupId: selectedGroupId, setGroupId: setSelectedGroupId } =
+    useMemberSelectedGroup();
+  const practice = useTodaysPractice(selectedGroupId);
   const [refreshing, setRefreshing] = useState(false);
   useLocalPerformanceSpan(
     'screen.home.cached-ready',
@@ -35,7 +38,7 @@ export default function UserHomeScreen() {
     setRefreshing(false);
   }, [practice]);
 
-  if (!groupId && !authLoading) {
+  if (!selectedGroupId && !authLoading) {
     return (
       <SafeAreaView className="flex-1 bg-gp-bg px-5 dark:bg-gp-bg-dark" edges={['top']}>
         <EmptyState title={t('pendingGroupTitle')} message={t('pendingGroupMessage')} />
@@ -53,6 +56,15 @@ export default function UserHomeScreen() {
 
         {/* Practice CTA stack sits above decorative feather; ads never share this layer. */}
         <View className="relative z-30 px-5" collapsable={false}>
+          {/* Hidden for a single group — a one-option picker is noise, not choice. */}
+          {groups.length > 1 ? (
+            <GroupScopeSelector
+              groups={groups}
+              selectedGroupId={selectedGroupId}
+              onSelect={(id) => void setSelectedGroupId(id)}
+            />
+          ) : null}
+
           {practice.error ? (
             <View className="mb-4">
               <ErrorState message={practice.error} onRetry={() => void practice.refresh()} />

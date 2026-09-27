@@ -33,6 +33,9 @@ const COLLECTION_REPORT_REMINDERS = 'practice_report_reminders';
 /** The Excel is generated for the whole group, so scan the full roster. */
 const ROSTER_REPORT_SCAN_LIMIT = ROSTER_SCAN_LIMIT;
 
+/** Firestore caps an `in` query at 30 values. */
+const PHONE_IN_QUERY_LIMIT = 30;
+
 const BRAND_SAFFRON = 'FFC45C26';
 const BRAND_GOLD = 'FFD4A017';
 const HEADER_FILL = 'FFF8F1E7';
@@ -136,7 +139,8 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
   // Same batched phone-keyed read the Practice screen uses, so a member whose
   // assignment doc still carries a previous groupId is not reported as blank.
   const memberAssignments = await loadAssignmentsByMemberKey(
-    rosterMembers.map((member) => member.memberKey)
+    rosterMembers.map((member) => member.memberKey),
+    groupId
   );
 
   const groupName =
@@ -183,6 +187,86 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
     linkIdentity(phoneToUid(phone.trim()), doc.id);
   }
 
+  /**
+   * Members who are no longer in this group but still have history here.
+   *
+   * The roster only knows who belongs to the group *today*, so a member removed
+   * last week — or a whole extra group an admin has just pruned — would silently
+   * vanish from the month they actually practised in. Their row is rebuilt from the
+   * assignment and completion docs that are already loaded above, which is what
+   * keeps the report an honest record of the month rather than of the roster.
+   */
+  const historical = new Map<string, { name: string; phoneNumber: string }>();
+  const noteHistorical = (memberKey: string, name: unknown, phone: unknown) => {
+    if (!memberKey) return;
+    const phoneNumber = typeof phone === 'string' ? phone.trim() : '';
+    const existing = historical.get(memberKey);
+    const resolvedName = typeof name === 'string' ? name.trim() : '';
+    if (existing) {
+      // Never downgrade a name we already have to a blank one.
+      if (!existing.name && resolvedName) existing.name = resolvedName;
+      if (!existing.phoneNumber && phoneNumber) existing.phoneNumber = phoneNumber;
+      return;
+    }
+    historical.set(memberKey, { name: resolvedName, phoneNumber });
+  };
+
+  for (const doc of assignmentsSnap.docs) {
+    const data = (doc.data() ?? {}) as Record<string, unknown>;
+    const phone = typeof data.phoneNumber === 'string' ? data.phoneNumber.trim() : '';
+    const memberKey =
+      (typeof data.memberKey === 'string' && data.memberKey.trim()) ||
+      (phone ? phoneToUid(phone) : doc.id);
+    noteHistorical(memberKey, data.name, phone);
+    linkIdentity(memberKey, memberKey);
+  }
+
+  for (const doc of logsSnap.docs) {
+    const data = (doc.data() ?? {}) as Record<string, unknown>;
+    const phone = typeof data.phoneNumber === 'string' ? data.phoneNumber.trim() : '';
+    for (const key of logIdentityKeys(data)) {
+      noteHistorical(key, data.name, phone);
+      linkIdentity(key, key);
+    }
+  }
+
+  // Names for members who have since left the group: the assignment doc carries one
+  // from now on, and for older data fall back to whichever profile still has the
+  // phone number on file.
+  const needName = [...historical.entries()]
+    .filter(([, value]) => !value.name && value.phoneNumber)
+    .map(([memberKey, value]) => ({ memberKey, phoneNumber: value.phoneNumber }));
+  for (let i = 0; i < needName.length; i += PHONE_IN_QUERY_LIMIT) {
+    const slice = needName.slice(i, i + PHONE_IN_QUERY_LIMIT);
+    try {
+      const snap = await db
+        .collection(COLLECTION_USERS)
+        .where(
+          'phoneNumber',
+          'in',
+          slice.map((entry) => entry.phoneNumber)
+        )
+        .get();
+      const byPhone = new Map<string, string>();
+      for (const doc of snap.docs) {
+        const phone = doc.data()?.phoneNumber;
+        const name = doc.data()?.name;
+        if (typeof phone === 'string' && typeof name === 'string' && name.trim()) {
+          byPhone.set(phone.trim(), name.trim());
+        }
+      }
+      for (const entry of slice) {
+        const name = byPhone.get(entry.phoneNumber);
+        const record = historical.get(entry.memberKey);
+        if (name && record && !record.name) record.name = name;
+      }
+    } catch (error) {
+      console.warn('practice_report_name_lookup_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   /** identity → dateKey → completed itemKeys */
   const completedByKeyDate = new Map<string, Map<string, Set<string>>>();
   for (const doc of logsSnap.docs) {
@@ -208,11 +292,25 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
 
   const rows: Row[] = [];
 
+  // Live members first, then anyone whose history is still filed under this group.
+  const reportMembers = new Map<string, { name: string; phoneNumber: string }>();
   for (const member of rosterMembers) {
     if (member.role !== 'user') continue;
+    const phoneNumber = member.phoneNumber;
+    reportMembers.set(member.memberKey, {
+      name: member.name.trim() ? member.name.trim() : phoneNumber,
+      phoneNumber,
+    });
+  }
+  for (const [memberKey, value] of historical) {
+    if (reportMembers.has(memberKey)) continue;
+    reportMembers.set(memberKey, {
+      name: value.name || value.phoneNumber || memberKey,
+      phoneNumber: value.phoneNumber,
+    });
+  }
 
-    const { memberKey, phoneNumber } = member;
-    const name = member.name.trim() ? member.name.trim() : phoneNumber;
+  for (const [memberKey, member] of reportMembers) {
     const items = itemsByMemberKey.get(memberKey) ?? [];
     const identityKeys = identityKeysByMemberKey.get(memberKey) ?? new Set([memberKey]);
     identityKeys.add(memberKey);
@@ -234,8 +332,8 @@ export async function getPracticeMonthlyReportCore(input: { groupId: string }) {
     }
 
     rows.push({
-      name,
-      phoneNumber,
+      name: member.name,
+      phoneNumber: member.phoneNumber,
       assignment: assignmentLabel(items),
       cells,
     });

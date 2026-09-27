@@ -14,6 +14,7 @@ import {
 import { httpsCallable } from 'firebase/functions';
 
 import { db, functions } from '@/lib/firebase';
+import { profileGroupIds } from '@/lib/users';
 import type { AccessRosterEntry, RosterRole, RosterStatus } from '@/types/roster';
 
 export const ROSTER_PAGE_SIZE = 50;
@@ -29,12 +30,17 @@ function toDate(value: unknown): Date | undefined {
 }
 
 function mapRoster(id: string, data: Record<string, unknown>): AccessRosterEntry {
+  const groupIds = profileGroupIds({
+    groupId: typeof data.groupId === 'string' ? data.groupId : null,
+    groupIds: Array.isArray(data.groupIds) ? data.groupIds.map(String) : undefined,
+  });
   return {
     id,
     name: String(data.name ?? ''),
     phoneNumber: String(data.phoneNumber ?? ''),
     role: data.role === 'admin' ? 'admin' : 'user',
-    groupId: typeof data.groupId === 'string' ? data.groupId : null,
+    groupId: groupIds[0] ?? null,
+    groupIds,
     assignedGroupIds: Array.isArray(data.assignedGroupIds)
       ? data.assignedGroupIds.map(String)
       : [],
@@ -206,6 +212,8 @@ export async function upsertAccessRosterRemote(input: {
   name: string;
   role: RosterRole;
   groupId?: string | null;
+  /** Every group the member belongs to; the first entry is the primary group. */
+  groupIds?: string[];
   assignedGroupIds?: string[];
   status?: RosterStatus;
 }) {

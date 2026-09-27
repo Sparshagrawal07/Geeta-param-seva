@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 
 import type { UserProfile } from '@/lib/users';
+import { profileGroupIds } from '@/lib/users';
 import { db } from '@/lib/firebase';
 import {
   MEMBER_LIST_MAX_PAGES,
@@ -18,12 +19,17 @@ import {
 
 function mapUser(id: string, data: Record<string, unknown>): UserProfile {
   const role = data.role === 'senior_admin' ? 'senior_admin' : data.role === 'admin' ? 'admin' : 'user';
+  const groupIds = profileGroupIds({
+    groupId: typeof data.groupId === 'string' ? data.groupId : null,
+    groupIds: Array.isArray(data.groupIds) ? data.groupIds.map(String) : undefined,
+  });
   return {
     uid: id,
     name: String(data.name ?? ''),
     phoneNumber: String(data.phoneNumber ?? ''),
     role,
-    groupId: typeof data.groupId === 'string' ? data.groupId : null,
+    groupId: groupIds[0] ?? null,
+    groupIds,
     assignedGroupIds: Array.isArray(data.assignedGroupIds) ? data.assignedGroupIds.map(String) : [],
   };
 }
@@ -51,11 +57,18 @@ async function fetchScopedMembersFromFirestore(scopeGroupIds: string[]): Promise
 
   for (let i = 0; i < scopeGroupIds.length; i += 10) {
     const batch = scopeGroupIds.slice(i, i + 10);
-    const memberSnapshot = await getDocs(
-      query(collection(db, 'users'), where('groupId', 'in', batch))
-    );
-    for (const entry of memberSnapshot.docs) {
-      byUid.set(entry.id, mapUser(entry.id, entry.data() as Record<string, unknown>));
+    // `groupIds` is the source of truth, but the scalar `groupId` is still indexed
+    // and still set on every row, so this second query keeps members visible during
+    // the window before the array index is live or a row has been backfilled.
+    const memberQueries = [
+      query(collection(db, 'users'), where('groupIds', 'array-contains-any', batch)),
+      query(collection(db, 'users'), where('groupId', 'in', batch)),
+    ];
+    for (const memberQuery of memberQueries) {
+      const memberSnapshot = await getDocs(memberQuery);
+      for (const entry of memberSnapshot.docs) {
+        byUid.set(entry.id, mapUser(entry.id, entry.data() as Record<string, unknown>));
+      }
     }
   }
 

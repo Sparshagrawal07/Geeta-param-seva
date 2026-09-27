@@ -8,6 +8,7 @@ import {
   LOCALE_STORAGE_KEY,
   PUSH_DEVICE_ID_KEY,
   SELECTED_GROUP_STORAGE_KEY,
+  selectedGroupStorageKey,
   THEME_STORAGE_KEY,
 } from '@/lib/session';
 import { TERMS_ACCEPTED_STORAGE_KEY } from '@/lib/terms-agreement';
@@ -21,6 +22,15 @@ describe('clearSessionState', () => {
     await AsyncStorage.setItem(SELECTED_GROUP_STORAGE_KEY, 'group-1');
     await clearSessionState();
     expect(await AsyncStorage.getItem(SELECTED_GROUP_STORAGE_KEY)).toBeNull();
+  });
+
+  it('removes the selected group key of every signed-in account', async () => {
+    // Keys are per-account, so sign-out cannot clear them from a fixed list alone.
+    await AsyncStorage.setItem(selectedGroupStorageKey('user-a'), 'group-1');
+    await AsyncStorage.setItem(selectedGroupStorageKey('user-b'), 'group-2');
+    await clearSessionState();
+    expect(await AsyncStorage.getItem(selectedGroupStorageKey('user-a'))).toBeNull();
+    expect(await AsyncStorage.getItem(selectedGroupStorageKey('user-b'))).toBeNull();
   });
 
   it('preserves theme storage key', async () => {

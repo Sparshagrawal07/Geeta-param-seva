@@ -3,6 +3,7 @@ import { NativeTabs } from 'expo-router/unstable-native-tabs';
 
 import { getSpiritualNativeTabsChrome } from '@/components/navigation/spiritual-native-tabs';
 import { useAppColors } from '@/hooks/use-app-colors';
+import { useMemberSelectedGroup } from '@/hooks/use-member-selected-group';
 import { useSevaTabBadge } from '@/hooks/use-seva-tab-badge';
 import { brandPalette } from '@/lib/brand-palette';
 import { useLocale } from '@/providers/locale-provider';
@@ -11,7 +12,8 @@ import { useLocale } from '@/providers/locale-provider';
 export default function UserNativeTabsLayout() {
   const { t } = useLocale();
   const { isDark } = useAppColors();
-  const { hasUnread, clearBadge } = useSevaTabBadge();
+  const { groupId } = useMemberSelectedGroup();
+  const { hasUnread, clearBadge } = useSevaTabBadge(groupId);
   const chrome = getSpiritualNativeTabsChrome();
 
   const navigationTheme = {

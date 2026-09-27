@@ -9,14 +9,21 @@
  * goes through this module, so all three screens cannot disagree.
  *
  * Degradation ladder — the first level that returns wins:
- *  1. `groupId` + `status` equality (cheapest, needs a composite index)
- *  2. `groupId` only, status/role defaulted in memory (single-field index only)
- *  3. bounded unfiltered scan, everything filtered in memory
+ *  1. `groupIds array-contains` UNION `groupId ==`, deduped in memory
+ *  2. bounded unfiltered scan, everything filtered in memory
+ *
+ * Level 1 is a union rather than a single `array-contains` on purpose. A query that
+ * *succeeds* but cannot see a legacy doc is far worse than one that fails loudly:
+ * `array-contains groupIds` silently skips every roster row written before the
+ * backfill, so a half-migrated database would quietly show a short member list with
+ * no error anywhere. Unioning in the scalar query covers both shapes during the
+ * rollout and is still correct once every row carries `groupIds`.
  */
 
-import { type DocumentData, type Query } from 'firebase-admin/firestore';
+import { type DocumentData, type Query, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 
 import { db } from './firebase-admin';
+import { readGroupIds, readPrimaryGroupId } from './group-membership';
 import { phoneToUid } from './member-identity';
 
 export type RosterRole = 'user' | 'admin';
@@ -30,7 +37,9 @@ export interface GroupRosterMember {
   /** Stable phone-keyed id; valid before the member has ever signed in. */
   memberKey: string;
   role: RosterRole;
+  /** Every group this member belongs to. `groupId` is `groupIds[0]`. */
   groupId: string | null;
+  groupIds: string[];
   assignedGroupIds: string[];
   status: RosterStatus;
 }
@@ -54,7 +63,8 @@ export function toRosterMember(id: string, data: DocumentData): GroupRosterMembe
     phoneNumber,
     memberKey: phoneToUid(phoneNumber),
     role: rosterRole(data),
-    groupId: typeof data.groupId === 'string' ? data.groupId : null,
+    groupId: readPrimaryGroupId(data),
+    groupIds: readGroupIds(data),
     assignedGroupIds: Array.isArray(data.assignedGroupIds) ? data.assignedGroupIds.map(String) : [],
     status: rosterStatus(data),
   };
@@ -67,7 +77,7 @@ export interface RosterFilter {
 }
 
 export function matchesRosterFilter(member: GroupRosterMember, filter: RosterFilter): boolean {
-  if (filter.groupId && member.groupId !== filter.groupId) return false;
+  if (filter.groupId && !member.groupIds.includes(filter.groupId)) return false;
   if (filter.role !== 'all' && member.role !== filter.role) return false;
   if (filter.status !== 'all' && member.status !== filter.status) return false;
   return true;
@@ -85,6 +95,30 @@ async function runQuery(query: Query) {
 }
 
 /**
+ * Every roster row that could belong to `groupId`, from either storage shape.
+ * Returns null only when *both* queries fail, so the caller can fall back to a scan.
+ */
+async function runGroupQueries(
+  groupId: string,
+  limit: number
+): Promise<QueryDocumentSnapshot[] | null> {
+  const [byArray, byScalar] = await Promise.all([
+    runQuery(db.collection('access_roster').where('groupIds', 'array-contains', groupId).limit(limit)),
+    runQuery(db.collection('access_roster').where('groupId', '==', groupId).limit(limit)),
+  ]);
+
+  if (byArray === null && byScalar === null) {
+    return null;
+  }
+
+  const byId = new Map<string, QueryDocumentSnapshot>();
+  for (const doc of [...(byScalar ?? []), ...(byArray ?? [])]) {
+    byId.set(doc.id, doc);
+  }
+  return [...byId.values()];
+}
+
+/**
  * Roster rows for a filter, sorted by name. Degrades instead of failing so a
  * missing index can never blank a screen.
  */
@@ -92,11 +126,9 @@ export async function loadRosterMembers(
   filter: RosterFilter,
   limit = ROSTER_SCAN_LIMIT
 ): Promise<GroupRosterMember[]> {
-  const scoped = filter.groupId
-    ? db.collection('access_roster').where('groupId', '==', filter.groupId)
-    : db.collection('access_roster');
-
-  let docs = await runQuery(scoped.limit(limit));
+  let docs = filter.groupId
+    ? await runGroupQueries(filter.groupId, limit)
+    : await runQuery(db.collection('access_roster').limit(limit));
   if (!docs) {
     docs = await runQuery(db.collection('access_roster').limit(limit));
   }

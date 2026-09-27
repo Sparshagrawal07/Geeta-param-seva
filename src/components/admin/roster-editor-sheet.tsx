@@ -5,10 +5,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { FormStack } from '@/components/layout/form-stack';
 import { PracticeAssignmentPicker } from '@/components/practice/practice-assignment-picker';
 import { AppButton } from '@/components/ui/button';
-import { AppSelect } from '@/components/ui/app-select';
 import { AppText } from '@/components/ui/app-text';
 import { SemanticText } from '@/components/ui/semantic-text';
 import { AppTextField } from '@/components/ui/text-field';
+import { useAuth } from '@/hooks/use-auth';
 import { triggerHaptic } from '@/lib/haptics';
 import {
   INDIA_COUNTRY_CODE,
@@ -17,9 +17,11 @@ import {
   toE164IndianMobile,
 } from '@/lib/phone';
 import { validatePracticeItems, type PracticeItem } from '@/lib/practice';
+import { profileGroupIds } from '@/lib/users';
 import { useLocale } from '@/providers/locale-provider';
 import {
   fetchMemberPracticeAssignment,
+  invalidateCachedPracticeAdminOverview,
   setMemberPracticeAssignmentRemote,
 } from '@/services/practice';
 import {
@@ -65,6 +67,7 @@ export function RosterEditorSheet({
   onError,
 }: RosterEditorSheetProps) {
   const { t } = useLocale();
+  const { profile } = useAuth();
 
   const availableGroups = useMemo(() => {
     if (!allowedGroupIds || allowedGroupIds.length === 0) return groups;
@@ -75,12 +78,22 @@ export function RosterEditorSheet({
   const [mode, setMode] = useState<RosterEditorMode>(initialMode);
   const [name, setName] = useState('');
   const [phoneDigits, setPhoneDigits] = useState('');
-  const [groupId, setGroupId] = useState<string | null>(null);
+  /** Order matters: the first entry is the member's primary group. */
+  const [groupIds, setGroupIds] = useState<string[]>([]);
   const [assignedGroupIds, setAssignedGroupIds] = useState<string[]>([]);
-  const [practiceItems, setPracticeItems] = useState<PracticeItem[]>([]);
+  /** Practice plan per group — a member practises separately in each. */
+  const [plans, setPlans] = useState<Record<string, PracticeItem[]>>({});
+  /** Groups whose existing plan was read, so an unread group is never overwritten. */
+  const [loadedPlanGroupIds, setLoadedPlanGroupIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [deactivating, setDeactivating] = useState(false);
   const [error, setError] = useState('');
+
+  const primaryGroupId = groupIds[0] ?? null;
+  const previousGroupIds = useMemo(
+    () => profileGroupIds(editing ?? {}),
+    [editing]
+  );
 
   useEffect(() => {
     if (!visible) return;
@@ -89,7 +102,14 @@ export function RosterEditorSheet({
     setName(editing?.name ?? prefill?.name ?? '');
     const sourcePhone = editing?.phoneNumber ?? prefill?.phoneNumber ?? '';
     setPhoneDigits(sourcePhone ? sanitizeIndianMobileDigits(sourcePhone.replace(/^\+91/, '')) : '');
-    setGroupId(editing?.groupId ?? defaultGroupId ?? availableGroups[0]?.id ?? null);
+    const memberGroupIds = editing
+      ? profileGroupIds(editing)
+      : defaultGroupId
+        ? [defaultGroupId]
+        : availableGroups[0]
+          ? [availableGroups[0].id]
+          : [];
+    setGroupIds(memberGroupIds);
     setAssignedGroupIds(
       editing?.assignedGroupIds?.length
         ? editing.assignedGroupIds
@@ -99,17 +119,25 @@ export function RosterEditorSheet({
             ? [availableGroups[0].id]
             : []
     );
-    setPracticeItems([]);
+    setPlans({});
+    setLoadedPlanGroupIds([]);
     setError('');
     setLoading(false);
     setDeactivating(false);
 
     if (editing?.role === 'user' && editing.phoneNumber) {
-      void fetchMemberPracticeAssignment(editing.phoneNumber)
-        .then((assignment) => {
-          if (assignment?.items?.length) setPracticeItems(assignment.items);
-        })
-        .catch(() => undefined);
+      // Each group is read separately — a member's plan is per group, so one
+      // failed read must not leave another group looking empty.
+      for (const groupId of memberGroupIds) {
+        void fetchMemberPracticeAssignment(editing.phoneNumber, groupId)
+          .then((assignment) => {
+            setPlans((current) => ({ ...current, [groupId]: assignment?.items ?? [] }));
+            setLoadedPlanGroupIds((current) =>
+              current.includes(groupId) ? current : [...current, groupId]
+            );
+          })
+          .catch(() => undefined);
+      }
     }
   }, [availableGroups, defaultGroupId, editing, initialMode, prefill, visible]);
 
@@ -126,6 +154,31 @@ export function RosterEditorSheet({
     );
   };
 
+  /** First selection wins the primary slot; the rest keep their order. */
+  const toggleMemberGroup = (id: string) => {
+    void triggerHaptic('selection');
+    setGroupIds((current) =>
+      current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]
+    );
+  };
+
+  /**
+   * A roster write changes who the practice screen lists, and that list is
+   * cached per group for the whole practice day. Drop the entries for every
+   * group the write touched — the one the member is leaving and the one they
+   * are joining — so a deactivated member cannot survive in a cached list.
+   *
+   * Best effort by design: the roster write has already succeeded, so a cache
+   * problem must not surface as a failed save.
+   */
+  const invalidatePracticeForGroups = async (...ids: (string | null | undefined)[]) => {
+    const uid = profile?.uid;
+    if (!uid) return;
+    for (const id of new Set(ids.filter((value): value is string => Boolean(value)))) {
+      await invalidateCachedPracticeAdminOverview(uid, id).catch(() => undefined);
+    }
+  };
+
   const handleSave = async () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
@@ -140,7 +193,7 @@ export function RosterEditorSheet({
     }
 
     const role: RosterRole = mode === 'admin' ? 'admin' : 'user';
-    if (role === 'user' && !groupId) {
+    if (role === 'user' && !primaryGroupId) {
       setError(t('selectGroup'));
       void triggerHaptic('warning');
       return;
@@ -150,7 +203,7 @@ export function RosterEditorSheet({
       void triggerHaptic('warning');
       return;
     }
-    if (role === 'user' && validatePracticeItems(practiceItems)) {
+    if (role === 'user' && validatePracticeItems(plans[primaryGroupId!] ?? [])) {
       setError(t('practicePickAdhyaysRequired'));
       void triggerHaptic('warning');
       return;
@@ -164,17 +217,29 @@ export function RosterEditorSheet({
         name: trimmedName,
         phoneNumber,
         role,
-        groupId: role === 'user' ? groupId : null,
+        groupId: role === 'user' ? primaryGroupId : null,
+        groupIds: role === 'user' ? groupIds : [],
         assignedGroupIds: role === 'admin' ? assignedGroupIds : [],
         status: 'active',
       });
-      if (role === 'user' && groupId) {
-        await setMemberPracticeAssignmentRemote({
-          groupId,
-          phoneNumber,
-          items: practiceItems,
-        });
+      if (role === 'user') {
+        // Only write a plan that was actually read, or that belongs to a group the
+        // member is being added to. An unread existing plan must survive the save.
+        for (const groupId of groupIds) {
+          const isNewGroup = !previousGroupIds.includes(groupId);
+          if (!isNewGroup && !loadedPlanGroupIds.includes(groupId)) continue;
+          await setMemberPracticeAssignmentRemote({
+            groupId,
+            phoneNumber,
+            items: plans[groupId] ?? [],
+          });
+        }
       }
+      await invalidatePracticeForGroups(
+        ...previousGroupIds,
+        ...groupIds,
+        ...(role === 'admin' ? assignedGroupIds : [])
+      );
       onClose();
       await onSaved({ phoneNumber, name: trimmedName });
       onSuccess(editing ? t('rosterUpdated') : t('rosterSaved'));
@@ -194,6 +259,10 @@ export function RosterEditorSheet({
     try {
       setDeactivating(true);
       await deactivateAccessRosterRemote(editing.phoneNumber);
+      await invalidatePracticeForGroups(
+        ...previousGroupIds,
+        ...(editing.assignedGroupIds ?? [])
+      );
       onClose();
       await onSaved({ phoneNumber: editing.phoneNumber, name: editing.name });
       onSuccess(t('rosterDeactivated'));
@@ -281,21 +350,59 @@ export function RosterEditorSheet({
                       {t('groupContext')}: {availableGroups[0]?.name}
                     </AppText>
                   ) : (
-                    <AppSelect
-                      label={t('selectGroup')}
-                      value={groupId}
-                      options={availableGroups.map((group) => ({ value: group.id, label: group.name }))}
-                      onSelect={setGroupId}
-                      hint={t('rosterMemberGroupHint')}
-                      disabled={busy}
-                    />
+                    <View className="gap-2">
+                      <AppText className="text-sm leading-5 text-gp-muted dark:text-gp-muted-dark">
+                        {t('rosterMemberGroupsHint')}
+                      </AppText>
+                      {availableGroups.map((group) => {
+                        const index = groupIds.indexOf(group.id);
+                        const active = index >= 0;
+                        return (
+                          <Pressable
+                            key={group.id}
+                            disabled={busy}
+                            onPress={() => toggleMemberGroup(group.id)}
+                            className={`flex-row items-center justify-between rounded-lg border px-4 py-3 ${
+                              active
+                                ? 'border-saffron bg-saffron/10'
+                                : 'border-gp-border bg-gp-card dark:border-gp-border-dark dark:bg-gp-card-dark'
+                            }`}>
+                            <AppText
+                              bold={active}
+                              className={active ? 'text-saffron' : 'text-gp-text dark:text-gp-text-dark'}>
+                              {group.name}
+                            </AppText>
+                            {index === 0 ? (
+                              <AppText className="text-xs text-gp-muted dark:text-gp-muted-dark">
+                                {t('rosterPrimaryGroupBadge')}
+                              </AppText>
+                            ) : null}
+                          </Pressable>
+                        );
+                      })}
+                    </View>
                   )}
-                  <AppText bold className="text-sm text-gp-text dark:text-gp-text-dark">
-                    {t('practiceAssignSection')}
-                  </AppText>
-                  <View className="overflow-hidden rounded-2xl border border-gp-border dark:border-gp-border-dark">
-                    <PracticeAssignmentPicker value={practiceItems} onChange={setPracticeItems} />
-                  </View>
+
+                  {/* A member practises per group, so each selected group carries its own plan. */}
+                  {groupIds.map((groupId) => {
+                    const group = availableGroups.find((entry) => entry.id === groupId);
+                    return (
+                      <View key={groupId} className="mt-4 gap-2">
+                        <AppText bold className="text-sm text-gp-text dark:text-gp-text-dark">
+                          {t('practiceAssignSection')}
+                          {group ? ` · ${group.name}` : ''}
+                        </AppText>
+                        <View className="overflow-hidden rounded-2xl border border-gp-border dark:border-gp-border-dark">
+                          <PracticeAssignmentPicker
+                            value={plans[groupId] ?? []}
+                            onChange={(items) =>
+                              setPlans((current) => ({ ...current, [groupId]: items }))
+                            }
+                          />
+                        </View>
+                      </View>
+                    );
+                  })}
                 </>
               ) : (
                 <View className="gap-2">

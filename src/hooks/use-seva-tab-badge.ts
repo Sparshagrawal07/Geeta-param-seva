@@ -20,10 +20,9 @@ export async function markSevaFeedSeen(uid: string, groupId: string, at = Date.n
 }
 
 /** Dot badge on Seva tab when the group has posts newer than last visit. */
-export function useSevaTabBadge() {
+export function useSevaTabBadge(groupId: string | null) {
   const { profile } = useAuth();
   const uid = profile?.uid ?? null;
-  const groupId = profile?.groupId ?? null;
   const [hasUnread, setHasUnread] = useState(false);
 
   const refresh = useCallback(async () => {

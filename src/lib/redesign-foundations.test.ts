@@ -88,12 +88,27 @@ describe('theme tokens', () => {
 
 describe('practice helpers', () => {
   it('builds stable practice day keys around noon IST', async () => {
-    const { practiceDateKey, practiceLogDocId } = await import('@/lib/practice');
+    const { practiceDateKey } = await import('@/lib/practice');
     const beforeNoon = new Date('2026-08-29T11:59:00+05:30');
     const afterNoon = new Date('2026-08-29T12:00:00+05:30');
     expect(practiceDateKey(beforeNoon)).toBe('2026-08-28');
     expect(practiceDateKey(afterNoon)).toBe('2026-08-29');
-    expect(practiceLogDocId('u1', '2026-08-29', 'adhyay_01')).toBe('u1_2026-08-29_adhyay_01');
+  });
+
+  it('scopes log and assignment ids by group and keeps the legacy log id readable', async () => {
+    const { assignmentDocId, practiceLogDocId, legacyPracticeLogDocId } = await import(
+      '@/lib/practice'
+    );
+    expect(practiceLogDocId('u1', 'g1', '2026-08-29', 'adhyay_01')).toBe(
+      'u1_g1_2026-08-29_adhyay_01'
+    );
+    // The same member and item in two groups must not collide.
+    expect(practiceLogDocId('u1', 'g1', '2026-08-29', 'adhyay_01')).not.toBe(
+      practiceLogDocId('u1', 'g2', '2026-08-29', 'adhyay_01')
+    );
+    // Pre-multi-group id stays derivable for the rollback-safe read fallback.
+    expect(legacyPracticeLogDocId('u1', '2026-08-29', 'adhyay_01')).toBe('u1_2026-08-29_adhyay_01');
+    expect(assignmentDocId('u1', 'g1')).toBe('u1_g1');
   });
 });
 

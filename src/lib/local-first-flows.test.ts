@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
+import { LocalFirstCache } from '@/lib/cache/cache';
+import { InMemoryCacheDriver } from '@/lib/cache/driver';
 import {
+  adminPracticeCacheKey,
   groupCacheScope,
   groupsCacheKey,
   practiceMutationId,
@@ -15,6 +18,7 @@ import {
   PRACTICE_MARK_ALL_OPERATION,
   PRACTICE_MARK_ONE_OPERATION,
   practiceRetryDelay,
+  applyOptimisticPracticeCompletion,
   type PracticeCompletionMutation,
 } from '@/lib/practice-local';
 import type { FeedItem } from '@/types/feed';
@@ -28,7 +32,16 @@ describe('local-first cache identity and freshness', () => {
     expect(groupsCacheKey('admin', ['b', 'a', 'a'])).toBe(
       groupsCacheKey('admin', ['a', 'b'])
     );
-    expect(todayPracticeCacheKey('2026-09-24')).toContain('2026-09-24');
+    expect(todayPracticeCacheKey('2026-09-24', 'group-1')).toContain('2026-09-24');
+  });
+
+  it('keeps each group on its own practice cache entry', () => {
+    expect(todayPracticeCacheKey('2026-09-24', 'group-1')).not.toBe(
+      todayPracticeCacheKey('2026-09-24', 'group-2')
+    );
+    expect(todayPracticeCacheKey('2026-09-24', 'group-1')).not.toBe(
+      todayPracticeCacheKey('2026-09-23', 'group-1')
+    );
   });
 
   it('refreshes missing, stale, or explicitly forced cache values', () => {
@@ -36,6 +49,36 @@ describe('local-first cache identity and freshness', () => {
     expect(shouldRefreshCache('stale')).toBe(true);
     expect(shouldRefreshCache('fresh')).toBe(false);
     expect(shouldRefreshCache('fresh', true)).toBe(true);
+  });
+});
+
+describe('admin practice overview cache', () => {
+  it('drops the whole overview on removal so a roster change cannot survive it', async () => {
+    const cache = new LocalFirstCache(new InMemoryCacheDriver());
+    const scope = groupCacheScope('admin-1', 'group-1');
+    const key = adminPracticeCacheKey('group-1', '2026-09-24');
+    // Still considered fresh, so only an explicit removal can dislodge it.
+    await cache.set(
+      key,
+      { members: [{ uid: 'a' }, { uid: 'b' }] },
+      { scope, staleForMs: 120_000, expiresInMs: 86_400_000 }
+    );
+    expect((await cache.get(key, { scope }))?.freshness).toBe('fresh');
+
+    await cache.remove(key, scope);
+
+    // A miss, not a stale hit: the next reader has to ask the server, which is
+    // the only place that knows member `b` was deactivated.
+    expect(await cache.get(key, { scope })).toBeNull();
+  });
+
+  it('keeps each group and practice day on its own entry', () => {
+    expect(adminPracticeCacheKey('group-1', '2026-09-24')).not.toBe(
+      adminPracticeCacheKey('group-2', '2026-09-24')
+    );
+    expect(adminPracticeCacheKey('group-1', '2026-09-24')).not.toBe(
+      adminPracticeCacheKey('group-1', '2026-09-23')
+    );
   });
 });
 
@@ -56,6 +99,7 @@ describe('feed badge derivation', () => {
 describe('practice optimistic outbox behavior', () => {
   const today: MyPracticeToday = {
     practiceDateKey: '2026-09-24',
+    groupId: 'group-1',
     assignment: {
       uid: 'user-a',
       groupId: 'group-1',
@@ -89,7 +133,12 @@ describe('practice optimistic outbox behavior', () => {
   }
 
   it('uses stable operation ids and overlays pending completion', () => {
-    const one = { uid: 'user-a', dateKey: '2026-09-24', itemKey: 'adhyay_01' };
+    const one = {
+      uid: 'user-a',
+      groupId: 'group-1',
+      dateKey: '2026-09-24',
+      itemKey: 'adhyay_01',
+    };
     expect(practiceMutationId(one)).toBe(practiceMutationId(one));
 
     const oneComplete = applyPendingPracticeMutations(today, [
@@ -100,10 +149,49 @@ describe('practice optimistic outbox behavior', () => {
     const allComplete = applyPendingPracticeMutations(today, [
       mutation(PRACTICE_MARK_ALL_OPERATION, {
         uid: 'user-a',
+        groupId: 'group-1',
         dateKey: '2026-09-24',
       }),
     ]);
     expect(allComplete.items.every((item) => item.completed)).toBe(true);
+  });
+
+  it('never lets one group’s completion settle into another group’s view', () => {
+    const otherGroupToday: MyPracticeToday = {
+      ...today,
+      groupId: 'group-2',
+      assignment: { ...today.assignment!, groupId: 'group-2' },
+    };
+
+    // Optimistic update is scoped: the same item key in another group is untouched.
+    const otherFromOptimistic = applyOptimisticPracticeCompletion(otherGroupToday, {
+      uid: 'user-a',
+      groupId: 'group-1',
+      dateKey: '2026-09-24',
+      itemKey: 'adhyay_01',
+    });
+    expect(otherFromOptimistic).toBe(otherGroupToday);
+
+    // Queued completions are scoped too — group-1's queue must not mark group-2.
+    const replayed = applyPendingPracticeMutations(otherGroupToday, [
+      mutation(PRACTICE_MARK_ONE_OPERATION, {
+        uid: 'user-a',
+        groupId: 'group-1',
+        dateKey: '2026-09-24',
+        itemKey: 'adhyay_01',
+      }),
+    ]);
+    expect(replayed.items.map((item) => item.completed)).toEqual([false, false]);
+    expect(replayed.groupId).toBe('group-2');
+  });
+
+  it('gives the same item in two groups two distinct outbox rows', () => {
+    const base = { uid: 'user-a', dateKey: '2026-09-24', itemKey: 'adhyay_01' };
+    // Without the group in the id these collapse into one row and one completion
+    // is silently lost when the user practises in both groups the same day.
+    expect(practiceMutationId({ ...base, groupId: 'group-1' })).not.toBe(
+      practiceMutationId({ ...base, groupId: 'group-2' })
+    );
   });
 
   it('bounds exponential replay delay', () => {

@@ -143,7 +143,7 @@ export class LocalFirstCache {
     };
   }
 
-  async remove(key: string, scope = CACHE_SCOPES.session): Promise<void> {
+  async remove(key: string, scope: string = CACHE_SCOPES.session): Promise<void> {
     await this.initialize();
     this.l1.delete(cacheId(scope, key));
     await this.driver.removeCacheEntry(scope, key);

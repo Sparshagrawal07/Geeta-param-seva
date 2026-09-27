@@ -6,6 +6,7 @@ import { SpiritualSurface, SpiritualSurfaceBody } from '@/components/spiritual/s
 import { LotusDivider } from '@/components/verse/lotus-divider';
 import { AppText } from '@/components/ui/app-text';
 import { FadeInView } from '@/components/ui/fade-in-view';
+import { useMemberSelectedGroup } from '@/hooks/use-member-selected-group';
 import { useTodaysPractice } from '@/hooks/use-todays-practice';
 import { AARTI_CONTENT } from '@/lib/aarti-content';
 import { AARTI_ITEM_KEY } from '@/lib/practice';
@@ -13,7 +14,8 @@ import { useLocale } from '@/providers/locale-provider';
 
 export default function AartiPracticeScreen() {
   const { t, locale } = useLocale();
-  const practice = useTodaysPractice();
+  const { groupId } = useMemberSelectedGroup();
+  const practice = useTodaysPractice(groupId);
   const aarti = practice.items.find((item) => item.itemKey === AARTI_ITEM_KEY);
   const inTodaysPractice = Boolean(aarti);
   const completed = Boolean(aarti?.completed);

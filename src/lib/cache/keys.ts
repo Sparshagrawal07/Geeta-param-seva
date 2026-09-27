@@ -57,8 +57,8 @@ export function rosterFirstPageCacheKey(input: {
   ].join(':');
 }
 
-export function todayPracticeCacheKey(dateKey: string): string {
-  return `practice:today:${safeSegment(dateKey)}`;
+export function todayPracticeCacheKey(dateKey: string, groupId: string): string {
+  return `practice:today:${safeSegment(groupId)}:${safeSegment(dateKey)}`;
 }
 
 export function adminPracticeCacheKey(groupId: string, dateKey: string): string {
@@ -72,11 +72,17 @@ export function shouldRefreshCache(
   return forceRefresh || freshness !== 'fresh';
 }
 
+/**
+ * Id for a queued completion. The group is part of it so marking Adhyay 1 done in
+ * one group is never collapsed into the queued completion for another — the two
+ * would otherwise share one outbox row and one of them would be silently lost.
+ */
 export function practiceMutationId(input: {
   uid: string;
+  groupId: string;
   dateKey: string;
   itemKey?: string;
 }): string {
   const target = input.itemKey ? `one:${safeSegment(input.itemKey)}` : 'all';
-  return `practice:${safeSegment(input.uid)}:${safeSegment(input.dateKey)}:${target}`;
+  return `practice:${safeSegment(input.uid)}:${safeSegment(input.groupId)}:${safeSegment(input.dateKey)}:${target}`;
 }
